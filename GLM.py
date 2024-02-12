@@ -1326,8 +1326,6 @@ def inhomo_baseline(ntrial=1, start=0, end=1e3, dt=1, num=10, add_constant_basis
         for i in range(ntrial):
             if apply_trial[i]:
                 baseline[(i*nt):(i*nt+nt)] = basis
-                
-
     return baseline
 
 def make_pillow_basis(num=10, peaks_min=0, peaks_max=100, nonlinear=0.2, dt=1, verbose=False):
