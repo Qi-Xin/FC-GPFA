@@ -88,15 +88,15 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         log_lambd = torch.einsum('mnlt,mlt->mnt', weights, mu) + bias
         # lambd = torch.exp(log_lambd)
         hessian_inv = torch.linalg.inv(hessian)
-        lambd = torch.exp(log_lambd)
-        # lambd = torch.exp(log_lambd + 1/2*(torch.diagonal(hessian_inv, dim1=-2, dim2=-1).unsqueeze(1)*weights**2).sum(axis=2))
+        # lambd = torch.exp(log_lambd)
+        lambd = torch.exp(log_lambd + 1/2*(torch.diagonal(hessian_inv, dim1=-2, dim2=-1).unsqueeze(1)*weights**2).sum(axis=2))
         inv_K_times_hessian_inv = inv_K@hessian_inv
         # print((torch.einsum('mlt,mlt->mlt', mu@inv_K, mu)).shape)
         # print(1/2*(mu@inv_K@mu.T).shape)
-        loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()
-        # loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
-        #     - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
-        #         + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
+        # loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()
+        loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
+            - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
+                + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
         if verbose:
             print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
         if loss.item() - loss_old < tol and i >= 1 :
@@ -121,16 +121,16 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         
         if mu_update.isnan().any():
             print('*******')
-            print(grad.isnan().any())
-            print(hessian.isnan().any())
-            print(grad.norm())
-            print(hessian.norm())
-            print(torch.einsum('mnlt,mnt->mlt', weights, Y - lambd).max())
-            print(torch.matmul(mu, inv_K).max())
-            print(f'log lmbd: {log_lambd.max()}')
-            print(f'weights: {np.abs(weights).max()}')
-            print(f'lambd: {lambd.max()}')
-            print(f'Y: {Y.max()}')
+            print(f"grad.isnan().any():{grad.isnan().any()}")
+            print(f"hessian.isnan().any():{hessian.isnan().any()}")
+            print(f"mu.isnan().any():{mu.isnan().any()}")
+            print(f"lambd.isnan().any():{lambd.isnan().any()}")
+            print(f"torch.einsum('mnlt,mnt->mlt', weights, Y - lambd).max():{torch.einsum('mnlt,mnt->mlt', weights, Y - lambd).max()}")
+            print(f"torch.matmul(mu, inv_K).max():{torch.matmul(mu, inv_K).max()}")
+            print(f'log_lambd.max(): {log_lambd.max()}')
+            print(f'np.abs(weights).max(): {np.abs(weights).max()}')
+            print(f'lambd.max(): {lambd.max()}')
+            print(f'Y.max(): {Y.max()}')
             raise ValueError('mu_update is nan in E-step')
         mu_new = mu - lr * mu_update
 
