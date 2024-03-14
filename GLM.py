@@ -37,7 +37,8 @@ from torch.nn import functional as F
 
 #%% New functions
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
-                                     bias=None, lr=2e-1, max_iter=10, tol=1e-2, verbose=False):
+                                     bias=None, lr=2e-1, max_iter=10, tol=1e-2, 
+                                     print_iter=1, verbose=False):
     """
     Performs fixed weights GPFA with Poisson observations.
 
@@ -97,55 +98,32 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
             - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
                 + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
-        if verbose:
+        if verbose and i % print_iter == 0:
             print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
+            # plt.plot(mu[0, 0, :].cpu().numpy(), label=f'Iteration {i+1}')
+            # plt.legend()
         if loss.item() - loss_old < tol and i >= 1 :
+            flag = True
             if verbose:
                 print(f'Converged at iteration {i} with loss {loss.item()}')
             break
-        if loss.item() is np.nan:
-            raise ValueError('Loss is nan in E-step')
 
         # Update gradient calculation
         grad = torch.einsum('mnlt,mnt->mlt', weights, Y - lambd) - torch.matmul(mu, inv_K)
         
         # Update Hessian calculation to reflect the new dimensions and calculations
         hessian = -inv_K.unsqueeze(0).unsqueeze(0) - make_4d_diagonal(torch.einsum('mnlt,mnt->mlt', weights**2, lambd))
-        
-        # Solving the linear system for each trial and latent dimension
-        # print(torch.linalg.matrix_rank(hessian[0,0,:,:]), hessian.shape[-1])
-        # print("hessian:", hessian.shape)
-        # print("grad:", grad.unsqueeze(-1).shape)
         mu_update = torch.linalg.solve(hessian, grad.unsqueeze(-1)).squeeze(-1)
         # mu_update = torch.linalg.lstsq(hessian, grad.unsqueeze(-1)).solution.squeeze(-1)
-        
-        if mu_update.isnan().any():
-            print('*******')
-            print(f"grad.isnan().any():{grad.isnan().any()}")
-            print(f"hessian.isnan().any():{hessian.isnan().any()}")
-            print(f"mu.isnan().any():{mu.isnan().any()}")
-            print(f"lambd.isnan().any():{lambd.isnan().any()}")
-            print(f"torch.einsum('mnlt,mnt->mlt', weights, Y - lambd).max():{torch.einsum('mnlt,mnt->mlt', weights, Y - lambd).max()}")
-            print(f"torch.matmul(mu, inv_K).max():{torch.matmul(mu, inv_K).max()}")
-            print(f'log_lambd.max(): {log_lambd.max()}')
-            print(f'np.abs(weights).max(): {np.abs(weights).max()}')
-            print(f'lambd.max(): {lambd.max()}')
-            print(f'Y.max(): {Y.max()}')
-            raise ValueError('mu_update is nan in E-step')
         mu_new = mu - lr * mu_update
 
         loss_old = loss.item()
 
-        # Check convergence
-        # if i %10 == 0:
-        #     print(f"mu.norm: {torch.norm(mu_update)}")
-        #     print(f"loss: {loss.item()}")
-        if torch.norm(mu - mu_new) < tol:
-            print(f'Converged at iteration {i} with loss {loss.item()}')
-            if verbose:
-                print(f'Converged at iteration {i} with loss {loss.item()}')
-                flag = True
-            break
+        # if torch.norm(lr * mu_update) < tol:
+        #     flag = True
+        #     if verbose:
+        #         print(f'Converged at iteration {i} with loss {loss.item()}')
+        #     break
         mu = mu_new
         
         # # Record mu in each iteration
