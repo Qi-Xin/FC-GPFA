@@ -98,6 +98,10 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
             - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
                 + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
+        # print(loss)
+        # print(weights)
+        # print(f"log_lambd.max():{log_lambd.max()}")
+        # print(f"torch.sum(lambd):{torch.sum(lambd)}")
         if verbose and i % print_iter == 0:
             print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
             # plt.plot(mu[0, 0, :].cpu().numpy(), label=f'Iteration {i+1}')
