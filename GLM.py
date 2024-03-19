@@ -33,7 +33,13 @@ import utility_functions as utils
 
 import torch
 from torch.autograd import Variable
+import torch.nn as nn
 from torch.nn import functional as F
+import torch.optim as optim
+
+
+#%% Define the linear model
+
 
 #%% New functions
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
