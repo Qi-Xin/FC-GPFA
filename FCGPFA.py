@@ -36,8 +36,11 @@ import GLM
 from DataLoader import Allen_dataset
 import FCGPFA
 
-#%% Define the model
-#%% New functions
+
+#%% Define FC-GPFA
+
+
+#%% Define decoder algorithm
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
                                      bias=None, lr=2e-1, max_iter=10, tol=1e-2, 
                                      print_iter=1, verbose=False):
