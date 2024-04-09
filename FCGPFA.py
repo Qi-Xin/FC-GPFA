@@ -414,7 +414,7 @@ def conv(raw_input, kernel, npadding=None, enforce_causality=True):
         enforce_causality (bool, optional): Whether to enforce causality by zero-padding the kernel. Defaults to True.
 
     Returns:
-        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nt + ntau - 1).
+        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nneuronj, nt).
 
     Raises:
         AssertionError: If the number of neurons in the kernel is not the same as the input.
@@ -470,7 +470,7 @@ def conv_subspace(raw_input, kernel, npadding=None, enforce_causality=True):
         enforce_causality (bool, optional): Whether to enforce causality by zero-padding the kernel. Defaults to True.
 
     Returns:
-        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nt + ntau - 1).
+        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nsubspace, nt).
 
     Raises:
         AssertionError: If the number of neurons in the kernel is not the same as the input.
