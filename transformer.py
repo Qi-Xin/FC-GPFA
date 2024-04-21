@@ -3,6 +3,8 @@ from torch import nn, optim
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import torch.distributions as dist
 
+import pickle
+import numpy as np
 import GLM
 
 class VAETransformer(nn.Module):
@@ -28,8 +30,9 @@ class VAETransformer(nn.Module):
         self.readout_matrices = nn.ModuleList([nn.Linear(n_factors, neurons) for neurons in n_neuron_per_area])
 
     def encode(self, src):
+        # src: ntokens x batch_size x d_model
         # Append CLS token to the beginning of each sequence
-        cls_tokens = self.cls_token.expand(-1, src.size(1), -1)  # Expand CLS to batch size
+        cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
         src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
         encoded = self.transformer_encoder(src)
         cls_encoded = encoded[0]  # Only take the output from the CLS token
@@ -50,13 +53,13 @@ class VAETransformer(nn.Module):
         
         # Apply spline_basis per area
         factors = torch.einsum('mafb,tb->maft', proj, self.spline_basis)  # batch_size x n_area x n_factors x nt
-
+        # 下面的要检查一下
         # Prepare to collect firing rates from each area
         all_firing_rates = []
-        for area_idx, readout_matrix in enumerate(self.readout_matrices):
+        for i_area, readout_matrix in enumerate(self.readout_matrices):
             # Extract factors for the current area
-            area_factors = factors[:, area_idx, :, :]  # batch_size x n_factors x nt (mft)
-            firing_rate = readout_matrix(area_factors)  # batch_size x n_neuron_area[area_idx] x nt
+            area_factors = factors[:, i_area, :, :]  # batch_size x n_factors x nt (mft)
+            firing_rate = readout_matrix(area_factors)  # batch_size x n_neuron_area[i_area] x nt
             all_firing_rates.append(firing_rate.permute(0, 2, 1).unsqueeze(1))  # batch_size x 1 x nt x n_neuron_area
 
         # Concatenate along a new dimension and then flatten to combine areas and neurons
@@ -78,42 +81,44 @@ class VAETransformer(nn.Module):
         kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         return poisson_loss + beta * kl_div
 
+def change_temporal_resolution(spikes, new_nt):
+    return [change_temporal_resolution_single(spikes[i], new_nt) for i in range(len(spikes))]
+
+def change_temporal_resolution_single(spike_train, num_merge):
+    n_neuron, nt, ntrial = spike_train.shape
+    new_spike_train = np.zeros((n_neuron, nt//num_merge, ntrial))
+    for i in range(nt//num_merge):
+        new_spike_train[:,i,:] = np.sum(spike_train[:,i*num_merge:(i+1)*num_merge,:], axis=1)
+    return new_spike_train
+    
+
+
+############### Hyperparameters ###############
+nl_dim, num_layers, dim_feedforward = 3, 4, 64
+num_merge = 5 # Merge 5 time bins into 1, so new temporal resolution is 5ms
+session_id = 757216464
+
+############### Model and Data Setup ###############
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-nt, n_neuron, nl_dim, n_area = 100, 5, 3, 5
-input_dim, num_layers, hidden_dim = 10, 4, 64
+with open('/home/export/qix/user_data/allen_spike_trains/'+str(session_id)+'.pkl', 'rb') as f:
+    spikes = pickle.load(f) # spikes[i]: (n_neuron, nt, ntrial)
+spikes_full = torch.tensor(np.concatenate(spikes, axis=0)).float().to(device)
+spikes_low_res = change_temporal_resolution(spikes, num_merge)
+# spikes_full_low_res: (ntoken, ntrial, n_neuron)
+spikes_full_low_res = torch.tensor(np.concatenate(spikes_low_res, axis=0)).float().to(device).permute(1, 2, 0)
+n_area = len(spikes)
+n_neuron_per_area = [spikes[i].shape[0] for i in range(n_area)]
+nt, ntrial = spikes[0].shape[1], spikes[0].shape[2]
+d_model = sum(n_neuron_per_area)
+B_spline_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=nt, dt=1, num=10, add_constant_basis=False)
 
-
-spline_basis = GLM.inhomo_baseline(ntrial=self.ntrial, 
-                                    start=0,
-                                    end=self.nt,
-                                    dt=1, 
-                                    **kwargs)
-
-model = VAETransformer(input_dim, cls_dim, num_layers, hidden_dim, nl_dim, spline_basis, nt, n_neuron, n_area)
+kwargs = {'d_model': d_model, 'num_layers': num_layers, 'dim_feedforward': dim_feedforward, 'nl_dim': nl_dim, 
+          'spline_basis': B_spline_basis, 'n_factors': 10, 'n_neuron_per_area': n_neuron_per_area}
+model = VAETransformer(**kwargs)
 model.to(device)
 
-# Example input
-x = torch.randn(nt, 1, input_dim)
-
+x = spikes_full_low_res.to(device)
 # Forward pass and loss
-recon_x, mu, logvar = model(x)
-loss = model.loss_function(recon_x, x, mu, logvar)
-print(f'Loss: {loss.item()}')
-
-
-
-# Constants
-nt, n_neuron, nl_dim = 100, 10, 3
-input_dim, cls_dim, num_layers, hidden_dim = 10, 10, 4, 64
-spline_basis = torch.randn(T, 30)  # Dummy B-spline basis
-
-# Model
-model = VAETransformer(input_dim, cls_dim, num_layers, hidden_dim, nl_dim, spline_basis, T, N)
-
-# Example input
-spikes = torch.randn(T, 1, input_dim)
-
-# Forward pass
-firing_rate, z, mu, logvar = model(spikes)
-loss = model.loss_function(firing_rate, spikes, mu, logvar)
+firing_rate, mu, logvar = model(x)
+loss = model.loss_function(firing_rate, x, mu, logvar)
 print(f'Loss: {loss.item()}')
