@@ -4,7 +4,7 @@ import json
 import os
 import numpy as np
 
-from bert_like_random_splines import VAETransformer
+from Transformer_splines import VAETransformer
 import utility_functions as utils
 import GLM
 

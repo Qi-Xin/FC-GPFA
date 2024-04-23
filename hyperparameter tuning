@@ -3,7 +3,7 @@ import socket
 import utility_functions as utils
 import pickle
 from hyperopt import fmin, tpe, hp, STATUS_OK, STATUS_FAIL, Trials
-from trainer import Trainer
+from model_trainer import Trainer
 
 ### Load data
 session_id = 757216464

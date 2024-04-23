@@ -2,14 +2,11 @@ import torch
 from torch import nn, optim
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import torch.distributions as dist
-
-import pickle
-import numpy as np
-import GLM
-from matplotlib import pyplot as plt
+import math
 
 class VAETransformer(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, nhead):
+        print(VAETransformer)
         super(VAETransformer, self).__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
         self.d_model = sum(self.nneuron_list)
@@ -27,21 +24,22 @@ class VAETransformer(nn.Module):
                                                 batch_first=True)
         self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=num_layers)
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
-        
         self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
         self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
-
         self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
+        self.positional_encoding = PositionalEncoding(self.d_model, max_len=self.nt+1)
 
     def encode(self, src):
         # src: mnt
         src = src.permute(2, 0, 1)
-        
         # src: ntokens x batch_size x d_model (tmn)
+        
         # Append CLS token to the beginning of each sequence
         cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
         src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
-        encoded = self.transformer_encoder(src)
+        
+        src = self.positional_encoding(src)  # Apply positional encoding
+        encoded = self.transformer_encoder(src) # Put it through the transformer encoder
         cls_encoded = encoded[0]  # Only take the output from the CLS token
         latent_params = self.to_latent(cls_encoded)
         return latent_params[:, :latent_params.size(-1)//2], latent_params[:, latent_params.size(-1)//2:]  # mu, log_var
@@ -71,7 +69,7 @@ class VAETransformer(nn.Module):
 
         # Concatenate along a new dimension and then flatten to combine areas and neurons
         firing_rates_combined = torch.cat(firing_rates_list, dim=2)  # batch_size x nt x nneuron_tot (mtn)        
-        return firing_rates_combined.permute(0,2,1) # mnt
+        return firing_rates_combined.permute(0,2,1) -5 # mnt
 
     def forward(self, src):
         mu, logvar = self.encode(src)
@@ -84,3 +82,19 @@ class VAETransformer(nn.Module):
         # KL divergence
         kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         return poisson_loss + beta * kl_div
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=500):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(1000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0)]
+        return self.dropout(x)
