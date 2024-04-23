@@ -9,14 +9,14 @@ import GLM
 from matplotlib import pyplot as plt
 
 class VAETransformer(nn.Module):
-    def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactors, nneuron_list, dropout, nhead):
+    def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, nhead):
         super(VAETransformer, self).__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
         self.d_model = sum(self.nneuron_list)
         self.nt, self.nbasis = spline_basis.shape
         self.narea = len(self.nneuron_list)
         self.nneuron_tot = self.d_model
-        self.nfactors = nfactors
+        self.nfactor = nfactor
         self.nl_dim = nl_dim
         self.nhead = nhead
         self.training = True
@@ -28,10 +28,10 @@ class VAETransformer(nn.Module):
         self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=num_layers)
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
         
-        self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactors)
+        self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
         self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
 
-        self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactors, neurons) for neurons in self.nneuron_list])
+        self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
 
     def encode(self, src):
         # src: mnt
@@ -55,17 +55,17 @@ class VAETransformer(nn.Module):
             return mu
         
     def decode(self, z):
-        proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactors)
-        proj = proj.view(-1, self.narea, self.nfactors, self.nbasis)  # batch_size x narea x nfactors x nbasis **mafb**
+        proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactor)
+        proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
         
         # Apply spline_basis per area
-        factors = torch.einsum('mafb,tb->matf', proj, self.spline_basis)  # batch_size x narea x nt x nfactors**matf**
+        factors = torch.einsum('mafb,tb->matf', proj, self.spline_basis)  # batch_size x narea x nt x nfactor**matf**
         
         # Prepare to collect firing rates from each area
         firing_rates_list = []
         for i_area, readout_matrix in enumerate(self.readout_matrices):
             # Extract factors for the current area
-            area_factors = factors[:, i_area, :, :]  # batch_size x nt x nfactors (mtf)
+            area_factors = factors[:, i_area, :, :]  # batch_size x nt x nfactor (mtf)
             firing_rates = readout_matrix(area_factors)  # batch_size x nt x nneuron_area[i_area] (mtn)
             firing_rates_list.append(firing_rates)
 
@@ -86,7 +86,7 @@ class VAETransformer(nn.Module):
         return poisson_loss + beta * kl_div
 
 
-    
+'''
 if __name__ == '__main__':
     import utility_functions as utils
     
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     learning_rate = 1e-2
     warm_up_epochs = 3
     num_B_spline_basis = 15
-    nfactors = 5
+    nfactor = 5
     batch_size = 128
     dropout = 0.5
     patience = 5
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     B_spline_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=nt, dt=1, num=num_B_spline_basis, add_constant_basis=True)
     B_spline_basis = torch.tensor(B_spline_basis).float().to(device)
 
-    model = VAETransformer(d_model, num_layers, dim_feedforward, nl_dim, B_spline_basis, nfactors, nneuron_list, dropout).to(device)
+    model = VAETransformer(d_model, num_layers, dim_feedforward, nl_dim, B_spline_basis, nfactor, nneuron_list, dropout).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
     best_loss = float('inf')
@@ -195,3 +195,4 @@ if __name__ == '__main__':
             if no_improve_epoch >= patience:
                 print('Early stopping triggered.')
                 break
+'''
