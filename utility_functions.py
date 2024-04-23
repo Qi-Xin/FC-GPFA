@@ -3,7 +3,6 @@ import scipy
 import matplotlib. pyplot as plt
 from scipy import signal 
 
-##### Yu Chen
 import networkx as nx
 import pickle
 import seaborn as sns
@@ -11,6 +10,8 @@ import scipy.interpolate
 import copy
 import pandas as pd
 import scipy.signal
+import torch
+import random
 
 ##### Useful information about Allen brain areas
 
@@ -181,6 +182,24 @@ def use_pdf_plot(**kwargs):
 def use_default_plot():
     sns.reset_orig()
     rcParams.update(rcParamsDefault)
+    
+def set_seed(seed):
+    """Set seed for reproducibility."""
+    random.seed(seed)  # Python random module
+    np.random.seed(seed)  # Numpy module
+    torch.manual_seed(seed)  # CPU
+    torch.cuda.manual_seed(seed)  # GPU
+    
+def change_temporal_resolution(spikes, num_merge):
+    return [change_temporal_resolution_single(spikes[i], num_merge) for i in range(len(spikes))]
+
+def change_temporal_resolution_single(spike_train, num_merge):
+    ntrial, nneuron, nt = spike_train.shape
+    new_spike_train = np.zeros((ntrial, nneuron, nt//num_merge))
+    for t in range(nt//num_merge):
+        new_spike_train[:,:,t] = np.sum(spike_train[:,:,t*num_merge:(t+1)*num_merge], axis=2)
+    return new_spike_train
+
 
 def color_by_brain_area(ccf_structure, colortype='normal'):
     """Assign a color for a brain area."""
