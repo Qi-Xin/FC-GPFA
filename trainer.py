@@ -165,7 +165,7 @@ class Trainer:
         self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
-    def predict_all(self):
+    def predict_all(self, return_torch=True):
         self.model.eval()
         self.model.training = False
         mu_list = []
@@ -179,7 +179,11 @@ class Trainer:
                 firing_rate, z, mu, logvar = self.model(data)
                 mu_list.append(mu)
                 firing_rate_list.append(firing_rate)
-        return torch.concat(firing_rate_list, dim=1).cpu().numpy(), torch.concat(mu_list, dim=1).cpu().numpy()
+        if return_torch:
+            return torch.concat(firing_rate_list, dim=0).cpu(), torch.concat(mu_list, dim=0).cpu()
+        else:
+            return torch.concat(firing_rate_list, dim=0).cpu().numpy(), torch.concat(mu_list, dim=0).cpu().numpy()
+        
 
     def save_model_and_hp(self):
         filename = self.path + '/best_model_and_hp.pth'
@@ -188,7 +192,6 @@ class Trainer:
             'params': self.params,
         }, filename)
         
-
     def load_model_and_hp(self, filename=None):
         if filename is None:
             print(f"Loading default model from {self.path}")
