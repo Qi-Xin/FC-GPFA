@@ -29,10 +29,10 @@ class VAETransformer(nn.Module):
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
         ##################################
         # Enhanced decoder_fc with additional layers and non-linearities
-        self.decoder_matrix = nn.Parameter(torch.randn(nl_dim, self.nt, self.d_model)-0.5)
+        # self.decoder_matrix = nn.Parameter(torch.randn(nl_dim, self.nt, self.d_model)-0.5)
         
-        # self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
-        # torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
+        self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+        torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
         # torch.nn.init.uniform_(self.decoder_fc.weight, -2, 2)  # Initialize weights uniformly in the range [-0.5, 0.5]
         # torch.nn.init.constant_(self.decoder_fc.bias, 0)           # Initialize biases to 0 (you can choose any constant value)
 
@@ -77,9 +77,8 @@ class VAETransformer(nn.Module):
             return mu
         
     def decode(self, z):
-        proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
-        return proj-3
-        
+        # proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
+        # return proj-3
         
         proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactor)
         proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**

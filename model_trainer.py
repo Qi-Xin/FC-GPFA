@@ -98,12 +98,12 @@ class Trainer:
         
         # Define different learning rates
         standard_lr = self.params['learning_rate']
-        decoder_matrix_lr = 1e-1  # Higher learning rate for decoder_matrix
+        decoder_lr = self.params['learning_rate_decoder']  # Higher learning rate for decoder_matrix
 
         # Configure optimizer with two parameter groups
         self.optimizer = optim.Adam([
-            {'params': self.model.decoder_matrix, 'lr': decoder_matrix_lr},  # Higher learning rate for decoder_matrix
-            {'params': [p for n, p in self.model.named_parameters() if n != 'decoder_matrix'], 'lr': standard_lr}  # Standard learning rate for all other parameters
+            {'params': [p for n, p in self.model.named_parameters() if 'decoder_fc' not in n], 'lr': standard_lr},
+            {'params': self.model.decoder_fc.parameters(), 'lr': decoder_lr},
         ])
         ################################
         if verbose:
@@ -122,15 +122,16 @@ class Trainer:
         
         # Function to adjust learning rate
         def adjust_learning_rate(optimizer, epoch):
-            lr = self.params['learning_rate'] * (epoch + 1) / self.params['warm_up_epoch']
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
+            standard_lr = self.params['learning_rate'] * (epoch + 1) / self.params['warm_up_epoch']
+            decoder_lr = self.params['learning_rate_decoder'] * (epoch + 1) / self.params['warm_up_epoch']
+            optimizer.param_groups[0]['lr'] = standard_lr
+            optimizer.param_groups[1]['lr'] = decoder_lr
         
         ### Training and Testing Loops
         for epoch in range(self.params['max_epoch']):
             # Warm up
-            # if epoch < self.params['warm_up_epoch']:
-            #     adjust_learning_rate(self.optimizer, epoch)
+            if epoch < self.params['warm_up_epoch']:
+                adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
             self.training = False
             train_loss = 0.0
