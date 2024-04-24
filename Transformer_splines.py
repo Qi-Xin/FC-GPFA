@@ -16,18 +16,40 @@ class VAETransformer(nn.Module):
         self.nfactor = nfactor
         self.nl_dim = nl_dim
         self.nhead = nhead
-        self.training = True
+        self.training = False
         
         self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
-        transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, nhead=self.nhead,
-                                                dim_feedforward=dim_feedforward, dropout=dropout,
-                                                batch_first=True)
+        transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, 
+                                                            nhead=self.nhead,
+                                                            dim_feedforward=dim_feedforward, 
+                                                            activation='gelu',
+                                                            dropout=dropout,
+                                                            batch_first=True)
         self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=num_layers)
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
-        self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+        ##################################
+        # Enhanced decoder_fc with additional layers and non-linearities
+        self.decoder_matrix = nn.Parameter(torch.randn(nl_dim, self.nt, self.d_model)-0.5)
+        
+        # self.decoder_fc = nn.Linear(nl_dim, self.nt * self.d_model)
+        
+        # self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+        # torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
+        # torch.nn.init.uniform_(self.decoder_fc.weight, -2, 2)  # Initialize weights uniformly in the range [-0.5, 0.5]
+        # torch.nn.init.constant_(self.decoder_fc.bias, 0)           # Initialize biases to 0 (you can choose any constant value)
+
+        # self.decoder_fc = nn.Sequential(
+        #     nn.Linear(nl_dim, nl_dim * 5),  # Expand dimension
+        #     nn.GELU(),                      # Non-linear activation
+        #     nn.Dropout(dropout),            # Dropout for regularization
+        #     nn.Linear(nl_dim * 5, nl_dim* 5),  # Contract dimension
+        #     nn.GELU(),                      # Another non-linear activation
+        #     nn.Linear(nl_dim* 5, self.nbasis * self.narea * self.nfactor)  # Final output to match required dimensions
+        # )
+        ##################################
         self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
         self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
-        self.positional_encoding = PositionalEncoding(self.d_model, max_len=self.nt+1)
+        self.positional_encoding = PositionalEncoding(self.d_model)
 
     def encode(self, src):
         # src: mnt
@@ -40,7 +62,10 @@ class VAETransformer(nn.Module):
         
         src = self.positional_encoding(src)  # Apply positional encoding
         encoded = self.transformer_encoder(src) # Put it through the transformer encoder
-        cls_encoded = encoded[0]  # Only take the output from the CLS token
+        ##################################
+        # cls_encoded = encoded[0,:,:]  # Only take the output from the CLS token
+        cls_encoded = encoded.mean(dim=0)  # average pooling over all tokens
+        ##################################
         latent_params = self.to_latent(cls_encoded)
         return latent_params[:, :latent_params.size(-1)//2], latent_params[:, latent_params.size(-1)//2:]  # mu, log_var
 
@@ -48,11 +73,16 @@ class VAETransformer(nn.Module):
         if self.training:
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
-            return mu + eps * std
+            # return mu + eps * std
+            return mu
         else:
             return mu
         
     def decode(self, z):
+        proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
+        return proj
+        
+        
         proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactor)
         proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
         
@@ -76,15 +106,18 @@ class VAETransformer(nn.Module):
         z = self.sample_a_latent(mu, logvar)
         return self.decode(z), z, mu, logvar
 
-    def loss_function(self, recon_x, x, mu, logvar, beta=1.0):
+    def loss_function(self, recon_x, x, mu, logvar, beta=0.0):
         # Poisson loss
-        poisson_loss = torch.mean(torch.exp(recon_x) - x * recon_x)
+        poisson_loss = (torch.exp(recon_x) - x * recon_x).mean()
+        
         # KL divergence
-        kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        return poisson_loss + beta * kl_div
+        kl_div = torch.mean(-0.5 * (1 + logvar - mu.pow(2) - logvar.exp()))
+        kl_div *= self.nl_dim/(self.nneuron_tot*self.nt)
+        # return poisson_loss + beta * kl_div
+        return poisson_loss
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=500):
+    def __init__(self, d_model, dropout=0.0, max_len=500):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 

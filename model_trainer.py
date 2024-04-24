@@ -75,7 +75,7 @@ class Trainer:
         train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[train_idx], self.spikes_full[train_idx])
         test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[test_idx], self.spikes_full[test_idx])
 
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.params['batch_size'], shuffle=True)
+        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.params['batch_size'], shuffle=False)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.params['batch_size'], shuffle=False)
         if verbose:
             print(f"Data processed. Train set size: {len(train_dataset)}, Test set size: {len(test_dataset)}")
@@ -93,7 +93,19 @@ class Trainer:
                                     nneuron_list=self.nneuron_list,
                                     dropout=self.params['dropout'], 
                                     nhead=self.params['nhead']).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['learning_rate'])
+        ################################
+        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['learning_rate'])
+        
+        # Define different learning rates
+        standard_lr = self.params['learning_rate']
+        decoder_matrix_lr = 5e-1  # Higher learning rate for decoder_matrix
+
+        # Configure optimizer with two parameter groups
+        self.optimizer = optim.Adam([
+            {'params': self.model.decoder_matrix, 'lr': decoder_matrix_lr},  # Higher learning rate for decoder_matrix
+            {'params': [p for n, p in self.model.named_parameters() if n != 'decoder_matrix'], 'lr': standard_lr}  # Standard learning rate for all other parameters
+        ])
+        ################################
         if verbose:
             print(f"Model initialized. Training on {self.device}")
 
@@ -113,14 +125,14 @@ class Trainer:
             lr = self.params['learning_rate'] * (epoch + 1) / self.params['warm_up_epoch']
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
-    
+        
         ### Training and Testing Loops
         for epoch in range(self.params['max_epoch']):
             # Warm up
-            if epoch < self.params['warm_up_epoch']:
-                adjust_learning_rate(self.optimizer, epoch)
+            # if epoch < self.params['warm_up_epoch']:
+            #     adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
-            self.training = True
+            self.training = False
             train_loss = 0.0
             for data, targets in self.train_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
@@ -131,6 +143,8 @@ class Trainer:
                 self.optimizer.step()
                 train_loss += loss.item() * data.size(0)
             train_loss /= len(self.train_loader.dataset)
+            # print(mu)
+            # print(self.model.encode(self.spikes_full_low_res[:,:,:].to(self.device))[0])
 
             self.model.eval()
             self.model.training = False
@@ -169,6 +183,7 @@ class Trainer:
         self.model.eval()
         self.model.training = False
         mu_list = []
+        std_list = []
         firing_rate_list = []
         all_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res, self.spikes_full)
         all_loader = torch.utils.data.DataLoader(all_dataset, batch_size=self.params['batch_size'], shuffle=False)
@@ -178,13 +193,17 @@ class Trainer:
                 data, targets = data.to(self.device), targets.to(self.device)
                 firing_rate, z, mu, logvar = self.model(data)
                 mu_list.append(mu)
+                std_list.append(torch.exp(0.5 * logvar))
                 firing_rate_list.append(firing_rate)
         if return_torch:
-            return torch.concat(firing_rate_list, dim=0).cpu(), torch.concat(mu_list, dim=0).cpu()
+            return (torch.concat(firing_rate_list, dim=0).cpu(), 
+                    torch.concat(mu_list, dim=0).cpu(),
+                    torch.concat(std_list, dim=0).cpu())
         else:
-            return torch.concat(firing_rate_list, dim=0).cpu().numpy(), torch.concat(mu_list, dim=0).cpu().numpy()
+            return (torch.concat(firing_rate_list, dim=0).cpu().numpy(), 
+                    torch.concat(mu_list, dim=0).cpu().numpy(),
+                    torch.concat(std_list, dim=0).cpu().numpy())
         
-
     def save_model_and_hp(self):
         filename = self.path + '/best_model_and_hp.pth'
         torch.save({
