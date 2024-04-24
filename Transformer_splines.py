@@ -31,8 +31,6 @@ class VAETransformer(nn.Module):
         # Enhanced decoder_fc with additional layers and non-linearities
         self.decoder_matrix = nn.Parameter(torch.randn(nl_dim, self.nt, self.d_model)-0.5)
         
-        # self.decoder_fc = nn.Linear(nl_dim, self.nt * self.d_model)
-        
         # self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
         # torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
         # torch.nn.init.uniform_(self.decoder_fc.weight, -2, 2)  # Initialize weights uniformly in the range [-0.5, 0.5]
@@ -80,7 +78,7 @@ class VAETransformer(nn.Module):
         
     def decode(self, z):
         proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
-        return proj
+        return proj-3
         
         
         proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactor)

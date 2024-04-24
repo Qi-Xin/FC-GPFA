@@ -98,7 +98,7 @@ class Trainer:
         
         # Define different learning rates
         standard_lr = self.params['learning_rate']
-        decoder_matrix_lr = 5e-1  # Higher learning rate for decoder_matrix
+        decoder_matrix_lr = 1e-1  # Higher learning rate for decoder_matrix
 
         # Configure optimizer with two parameter groups
         self.optimizer = optim.Adam([
@@ -175,7 +175,7 @@ class Trainer:
                         print('Early stopping triggered.')
                     break
         
-        self.model.load_state_dict(torch.load(temp_best_model_path))
+        # self.model.load_state_dict(torch.load(temp_best_model_path))
         self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
