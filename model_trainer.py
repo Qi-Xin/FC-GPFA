@@ -151,14 +151,21 @@ class Trainer:
         self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
-    def predict_all(self, return_torch=True):
+    def predict(self, return_torch=True, dataset='all'):
         self.model.eval()
         self.model.training = False
         mu_list = []
         std_list = []
         firing_rate_list = []
-        all_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res, self.spikes_full)
-        all_loader = torch.utils.data.DataLoader(all_dataset, batch_size=self.params['batch_size'], shuffle=False)
+        if dataset == 'all':
+            all_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res, self.spikes_full)
+            all_loader = torch.utils.data.DataLoader(all_dataset, batch_size=self.params['batch_size'], shuffle=False)
+        elif dataset == 'train':
+            all_loader = self.train_loader
+        elif dataset == 'test':
+            all_loader = self.test_loader
+        else:
+            raise ValueError("Invalid dataset. Choose from 'all', 'train', or 'test'.")
         
         with torch.no_grad():
             for data, targets in all_loader:
