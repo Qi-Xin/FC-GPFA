@@ -5,4 +5,4 @@
 #SBATCH --time=01:00:00                # Time limit hrs:min:sec
 #SBATCH --output=python_job_%j.log     # Standard output and error log
 
-python bert_like_random_splines.py                  # Run the python script
+python hyperparameter_tuning.py                  # Run the python script
