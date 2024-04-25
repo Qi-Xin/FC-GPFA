@@ -13,33 +13,6 @@ First, load data "spikes", set path, set hyperparameters, and use these three to
 Then, call the trainer.train() method to train the model, which use early stop. 
 If the results is good, you can save the model along with hyperparameters (aka the trainer) 
     by calling trainer.save_model_and_hp() method.
-    
-'''
-
-
-'''
-session_id = 757216464
-
-### Dataset parameters
-num_merge = 5
-batch_size = 128
-
-### GLM parameters
-num_B_spline_basis = 15 
-
-### Transformer encoder parameters
-nl_dim = 5
-num_layers = 4
-dim_feedforward = 64 
-nfactor = 5
-nhead = 1
-
-### Training parameters
-learning_rate = 1e-2
-dropout = 0.5
-warm_up_epoch = 3
-max_epoch = 100
-patience_epoch = 5
 '''
 
 class Trainer:
@@ -133,13 +106,13 @@ class Trainer:
             if epoch < self.params['warm_up_epoch']:
                 adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
-            self.training = False
+            self.model.training = False
             train_loss = 0.0
             for data, targets in self.train_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
                 self.optimizer.zero_grad()
                 firing_rate, z, mu, logvar = self.model(data)
-                loss = self.model.loss_function(firing_rate, targets, mu, logvar)
+                loss = self.model.loss_function(firing_rate, targets, mu, logvar, beta=self.params['beta'])
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item() * data.size(0)

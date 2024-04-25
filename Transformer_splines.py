@@ -71,8 +71,8 @@ class VAETransformer(nn.Module):
         if self.training:
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
-            # return mu + eps * std
-            return mu
+            return mu + eps * std
+            # return mu
         else:
             return mu
         
@@ -103,15 +103,15 @@ class VAETransformer(nn.Module):
         z = self.sample_a_latent(mu, logvar)
         return self.decode(z), z, mu, logvar
 
-    def loss_function(self, recon_x, x, mu, logvar, beta=0.0):
+    def loss_function(self, recon_x, x, mu, logvar, beta=0.2):
         # Poisson loss
         poisson_loss = (torch.exp(recon_x) - x * recon_x).mean()
         
         # KL divergence
         kl_div = torch.mean(-0.5 * (1 + logvar - mu.pow(2) - logvar.exp()))
         kl_div *= self.nl_dim/(self.nneuron_tot*self.nt)
-        # return poisson_loss + beta * kl_div
-        return poisson_loss
+        return poisson_loss + beta * kl_div
+        # return poisson_loss
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.0, max_len=500):
