@@ -70,7 +70,7 @@ class VAETransformer(nn.Module):
     def sample_a_latent(self, mu, logvar):
         if self.training:
             std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
+            eps = torch.randn_like(1*std)
             return mu + eps * std
             # return mu
         else:

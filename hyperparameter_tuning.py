@@ -30,7 +30,7 @@ best_score = [float('inf')]
 def try_hp(params):
     trainer = Trainer(spikes, ckp_path, params)
     try:
-        score = trainer.train(verbose=False)
+        score = trainer.train(verbose=False, record_results=True)
         score = np.random.rand()
         if score < best_score[0]:
             best_score[0] = score

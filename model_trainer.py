@@ -44,9 +44,11 @@ class Trainer:
         split = int(np.floor(0.8 * self.ntrial))
         utils.set_seed(0)
         np.random.shuffle(indices)
-        train_idx, test_idx = indices[:split], indices[split:]
-        train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[train_idx], self.spikes_full[train_idx])
-        test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[test_idx], self.spikes_full[test_idx])
+        self.train_idx, self.test_idx = indices[:split], indices[split:]
+        train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.train_idx], 
+                                                       self.spikes_full[self.train_idx])
+        test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.test_idx], 
+                                                      self.spikes_full[self.test_idx])
 
         self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.params['batch_size'], shuffle=False)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.params['batch_size'], shuffle=False)
@@ -82,7 +84,7 @@ class Trainer:
         if verbose:
             print(f"Model initialized. Training on {self.device}")
 
-    def train(self, verbose=True):
+    def train(self, verbose=True, record_results=False):
         if verbose:
             print(f"Start training model with parameters: {self.params}")
         utils.set_seed(0)
@@ -106,7 +108,7 @@ class Trainer:
             if epoch < self.params['warm_up_epoch']:
                 adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
-            self.model.training = False
+            self.model.training = True
             train_loss = 0.0
             for data, targets in self.train_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
@@ -148,7 +150,8 @@ class Trainer:
                     break
         
         # self.model.load_state_dict(torch.load(temp_best_model_path))
-        self.log_results(best_train_loss, best_test_loss)
+        if record_results:
+            self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
     def predict(self, return_torch=True, dataset='all'):
