@@ -1,0 +1,11 @@
+slurmstepd-n01: error: Unable to create TMPDIR [/tmp/user/3379]: Permission denied
+slurmstepd-n01: error: Setting TMPDIR to /tmp
+  0%|          | 0/500 [00:00<?, ?trial/s, best loss=?]                                                       <class 'Transformer_splines.VAETransformer'>
+  0%|          | 0/500 [00:03<?, ?trial/s, best loss=?]                                                       New best score: 0.2965562650640299
+  0%|          | 0/500 [02:19<?, ?trial/s, best loss=?]                                                       with params: {'batch_size': 16, 'beta': 0.0, 'dim_feedforward': 64, 'dropout': 0.1, 'learning_rate': 1e-05, 'learning_rate_decoder': 0.0001, 'max_epoch': 300, 'nfactor': 4, 'nhead': 2, 'nl_dim': 2, 'num_B_spline_basis': 20, 'num_layers': 4, 'num_merge': 10, 'patience_epoch': 5, 'warm_up_epoch': 5}
+  0%|          | 0/500 [02:19<?, ?trial/s, best loss=?]  0%|          | 1/500 [02:19<19:21:35, 139.67s/trial, best loss: 0.2965562650640299]                                                                                     <class 'Transformer_splines.VAETransformer'>
+  0%|          | 1/500 [02:21<19:21:35, 139.67s/trial, best loss: 0.2965562650640299]/home/export/qix/anaconda3/envs/fcgpfa/lib/python3.9/site-packages/torch/nn/modules/transformer.py:306: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.self_attn.num_heads is odd
+  warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
+
+  0%|          | 2/500 [02:35<9:14:48, 66.84s/trial, best loss: 0.2965562650640299]                                                                                     <class 'Transformer_splines.VAETransformer'>
+  0%|          | 2/500 [02:37<9:14:48, 66.84s/trial, best loss: 0.2965562650640299]

@@ -13,8 +13,11 @@ stimuli_name = ''
 hostname = socket.gethostname()
 if hostname[:8] == "ghidorah":
     path_prefix = '/home'
-elif hostname[:6] == "wright":
+elif hostname == 'n01':
     path_prefix = '/home/export'
+else:
+    print(f"Unknown host: {hostname}")
+    raise ValueError("Unknown host, can't set path prefix")
 ckp_path = path_prefix+'/qix/user_data/FC-GPFA_checkpoint'
 with open(path_prefix+'/qix/user_data/allen_spike_trains/'+str(session_id)+'.pkl', 'rb') as f:
     spikes = pickle.load(f)

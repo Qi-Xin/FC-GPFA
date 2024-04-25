@@ -117,8 +117,6 @@ class Trainer:
                 self.optimizer.step()
                 train_loss += loss.item() * data.size(0)
             train_loss /= len(self.train_loader.dataset)
-            # print(mu)
-            # print(self.model.encode(self.spikes_full_low_res[:,:,:].to(self.device))[0])
 
             self.model.eval()
             self.model.training = False
@@ -203,5 +201,5 @@ class Trainer:
             "test_loss": test_loss,
         }
         with open(self.results_file, 'a') as file:
-            json.dump(results, file)
-            file.write('\n')
+            json.dump(results, file, indent=4, sort_keys=True)  # Indent each level by 4 spaces
+            file.write('\n')  # Write a newline after each set of results
