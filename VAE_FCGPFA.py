@@ -4,10 +4,9 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import torch.distributions as dist
 import math
 
-class VAETransformer(nn.Module):
+class VAETransformer_FCGPFA(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, nhead):
-        print(VAETransformer)
-        super(VAETransformer, self).__init__()
+        super(VAETransformer_FCGPFA, self).__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
         self.d_model = sum(self.nneuron_list)
         self.nt, self.nbasis = spline_basis.shape
