@@ -47,18 +47,20 @@ param_dist = {
     'num_merge': hp.choice('num_merge', [2, 5, 10, 20]),
     'batch_size': hp.choice('batch_size', [4, 8, 16, 32, 64, 128, 600]),
     'num_B_spline_basis': hp.choice('num_B_spline_basis', [10, 20, 30, 50]),
-    'nl_dim': hp.choice('nl_dim', [2, 4, 8, 16]),
+    'nl_dim': hp.choice('nl_dim', [4, 8, 16, 32]),
     'num_layers': hp.choice('num_layers', [2, 4, 8]),
-    'dim_feedforward': hp.choice('dim_feedforward', [32, 64, 128]),
-    'nfactor': hp.choice('nfactor', [2, 4, 8, 16]),
-    'nhead': hp.choice('nhead', [1, 2, 4]),
-    'learning_rate': hp.choice('learning_rate', [1e-5, 1e-4, 1e-3, 1e-2]),
-    'learning_rate_decoder': hp.choice('learning_rate_decoder', [1e-4, 1e-3, 1e-2, 1e-1]),
-    'dropout': hp.choice('dropout', [0, 0.05, 0.1, 0.2, 0.5]),
+    'dim_feedforward': hp.choice('dim_feedforward', [32, 64, 128, 256]),
+    'nfactor': hp.choice('nfactor', [8, 16, 32, 64, 128]),
+    'nhead': hp.choice('nhead', [1, 2]),
+    'learning_rate': hp.choice('learning_rate', [1e-4, 1e-3, 1e-2]),
+    'learning_rate_decoder': hp.choice('learning_rate_decoder', [1e-3, 1e-2, 1e-1]),
+    'dropout': hp.choice('dropout', [0, 0.1, 0.2, 0.3, 0.5]),
     'beta': hp.choice('beta', [0.0, 0.1, 0.4, 1.0]),
     'warm_up_epoch': hp.choice('warm_up_epoch', [5]),
     'max_epoch': hp.choice('max_epoch', [300]),
-    'patience_epoch': hp.choice('patience_epoch', [5])
+    'patience_epoch': hp.choice('patience_epoch', [5]),
+    'sample_latent': hp.choice('sample_latent', [True, False]),
+    'decoder_architecture': hp.choice('decoder_architecture', [0, 1, 2]),
 }
 
 

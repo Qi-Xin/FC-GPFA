@@ -5,7 +5,8 @@ import torch.distributions as dist
 import math
 
 class VAETransformer(nn.Module):
-    def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, nhead):
+    def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
+                 nhead, decoder_architecture):
         print(VAETransformer)
         super(VAETransformer, self).__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
@@ -16,7 +17,8 @@ class VAETransformer(nn.Module):
         self.nfactor = nfactor
         self.nl_dim = nl_dim
         self.nhead = nhead
-        self.training = False
+        self.sample_latent = False
+        self.decoder_architecture = decoder_architecture
         
         self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
         transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, 
@@ -29,21 +31,17 @@ class VAETransformer(nn.Module):
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
         ##################################
         # Enhanced decoder_fc with additional layers and non-linearities
-        # self.decoder_matrix = nn.Parameter(torch.randn(nl_dim, self.nt, self.d_model)-0.5)
-        
-        self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
-        torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
-        # torch.nn.init.uniform_(self.decoder_fc.weight, -2, 2)  # Initialize weights uniformly in the range [-0.5, 0.5]
-        # torch.nn.init.constant_(self.decoder_fc.bias, 0)           # Initialize biases to 0 (you can choose any constant value)
-
-        # self.decoder_fc = nn.Sequential(
-        #     nn.Linear(nl_dim, nl_dim * 5),  # Expand dimension
-        #     nn.GELU(),                      # Non-linear activation
-        #     nn.Dropout(dropout),            # Dropout for regularization
-        #     nn.Linear(nl_dim * 5, nl_dim* 5),  # Contract dimension
-        #     nn.GELU(),                      # Another non-linear activation
-        #     nn.Linear(nl_dim* 5, self.nbasis * self.narea * self.nfactor)  # Final output to match required dimensions
-        # )
+        if self.decoder_architecture == 0:
+            self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+            torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
+        else:
+            self.decoder_fc = nn.Sequential(
+                nn.Linear(nl_dim, nl_dim * self.decoder_architecture),  # Expand dimension
+                nn.ReLU(),                      # Non-linear activation
+                nn.Linear(nl_dim* self.decoder_architecture, self.nbasis * self.narea * self.nfactor)  # Final output to match required dimensions
+            )
+            torch.nn.init.kaiming_uniform_(self.decoder_fc[0].weight, mode='fan_in', nonlinearity='relu')
+            torch.nn.init.kaiming_uniform_(self.decoder_fc[2].weight, mode='fan_in', nonlinearity='relu')
         ##################################
         self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
         self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
@@ -68,7 +66,7 @@ class VAETransformer(nn.Module):
         return latent_params[:, :latent_params.size(-1)//2], latent_params[:, latent_params.size(-1)//2:]  # mu, log_var
 
     def sample_a_latent(self, mu, logvar):
-        if self.training:
+        if self.sample_latent:
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(1*std)
             return mu + eps * std

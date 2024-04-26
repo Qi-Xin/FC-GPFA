@@ -67,7 +67,8 @@ class Trainer:
                                     nfactor=self.params['nfactor'], 
                                     nneuron_list=self.nneuron_list,
                                     dropout=self.params['dropout'], 
-                                    nhead=self.params['nhead']).to(self.device)
+                                    nhead=self.params['nhead'],
+                                    decoder_architecture=self.params['decoder_architecture']).to(self.device)
         ################################
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['learning_rate'])
         
@@ -108,7 +109,7 @@ class Trainer:
             if epoch < self.params['warm_up_epoch']:
                 adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
-            self.model.training = True
+            self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
             for data, targets in self.train_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
@@ -121,7 +122,7 @@ class Trainer:
             train_loss /= len(self.train_loader.dataset)
 
             self.model.eval()
-            self.model.training = False
+            self.model.sample_latent = False
             test_loss = 0.0
             with torch.no_grad():
                 for data, targets in self.test_loader:
@@ -156,7 +157,7 @@ class Trainer:
 
     def predict(self, return_torch=True, dataset='all'):
         self.model.eval()
-        self.model.training = False
+        self.model.sample_latent = False
         mu_list = []
         std_list = []
         firing_rate_list = []
