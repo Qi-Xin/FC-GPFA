@@ -212,5 +212,5 @@ class Trainer:
             "test_loss": test_loss,
         }
         with open(self.results_file, 'a') as file:
-            json.dump(results, file, indent=4, sort_keys=True)  # Indent each level by 4 spaces
+            json.dump(results, file, indent=4, sort_keys=False)  # Indent each level by 4 spaces
             file.write('\n')  # Write a newline after each set of results
