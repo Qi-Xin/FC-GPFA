@@ -108,7 +108,7 @@ class Trainer:
             if epoch < self.params['warm_up_epoch']:
                 adjust_learning_rate(self.optimizer, epoch)
             self.model.train()
-            self.model.training = False
+            self.model.training = True
             train_loss = 0.0
             for data, targets in self.train_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
