@@ -111,25 +111,25 @@ class Trainer:
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
-            for data, targets in self.train_loader:
-                data, targets = data.to(self.device), targets.to(self.device)
+            for spikes_tokenized, spikes_raw in self.train_loader:
+                spikes_tokenized, spikes_raw = spikes_tokenized.to(self.device), spikes_raw.to(self.device)
                 self.optimizer.zero_grad()
-                firing_rate, z, mu, logvar = self.model(data)
-                loss = self.model.loss_function(firing_rate, targets, mu, logvar, beta=self.params['beta'])
+                firing_rate, z, mu, logvar = self.model(spikes_tokenized)
+                loss = self.model.loss_function(firing_rate, spikes_raw, mu, logvar, beta=self.params['beta'])
                 loss.backward()
                 self.optimizer.step()
-                train_loss += loss.item() * data.size(0)
+                train_loss += loss.item() * spikes_raw.size(0)
             train_loss /= len(self.train_loader.dataset)
 
             self.model.eval()
             self.model.sample_latent = False
             test_loss = 0.0
             with torch.no_grad():
-                for data, targets in self.test_loader:
-                    data, targets = data.to(self.device), targets.to(self.device)
-                    firing_rate, z, mu, logvar = self.model(data)
-                    loss = self.model.loss_function(firing_rate, targets, mu, logvar, beta=0.0)
-                    test_loss += loss.item() * data.size(0)
+                for spikes_tokenized, spikes_raw in self.test_loader:
+                    spikes_tokenized, spikes_raw = spikes_tokenized.to(self.device), spikes_raw.to(self.device)
+                    firing_rate, z, mu, logvar = self.model(spikes_tokenized)
+                    loss = self.model.loss_function(firing_rate, spikes_raw, mu, logvar, beta=0.0)
+                    test_loss += loss.item() * spikes_raw.size(0)
             test_loss /= len(self.test_loader.dataset)
 
             if verbose:
