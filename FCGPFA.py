@@ -41,7 +41,8 @@ from DataLoader import Allen_dataset
 
 # Define the model
 class FC_GPFA(nn.Module):
-    def __init__(self, spikes, latents=None, nlatent=None, npadding=None, K=None, initialized_with_gt=False, device='cpu'):
+    def __init__(self, spikes, latents=None, nlatent=None, npadding=None, K=None, initialized_with_gt=False, 
+                 use_gt_offset=False, nsubspace=1, device='cpu'):
             """
             Initialize the FC_GPFC class.
 
@@ -61,11 +62,15 @@ class FC_GPFA(nn.Module):
             self.ntrial, _, self.nt = self.spikes[0].shape
             self.npadding = npadding
             self.nt -= self.npadding
-            self.nneuron = [spike.shape[1] for spike in spikes]
-            self.tot_neuron = sum(self.nneuron)
-            self.accnneuron = [0]+np.cumsum(self.nneuron).tolist()
+            self.nneuron_list = [spike.shape[1] for spike in spikes]
+            self.nneuron_tot = sum(self.nneuron_list)
+            self.accnneuron = [0]+np.cumsum(self.nneuron_list).tolist()
             self.mu = None
             self.hessian = None
+            self.use_gt_offset = use_gt_offset
+            self.nsubspace = nsubspace
+            self.coupling_outputs_subspace = [[None]*self.npop for _ in range(self.npop)]
+            self.coupling_outputs = [[None]*self.npop for _ in range(self.npop)]
             
             if latents is not None:
                 self.nlatent = latents.shape[1]
@@ -74,20 +79,19 @@ class FC_GPFA(nn.Module):
                 self.K = torch.from_numpy(K).float().to(self.device)
                 self.nlatent = nlatent
                 self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, dtype=torch.float32, device=self.device)
-                # raise ValueError("Unfinished")
+            
+            self.estep_weight = torch.zeros(self.ntrial, self.nneuron_tot, self.nlatent, self.nt, device=self.device)
+            self.estep_bias = torch.zeros(self.ntrial, self.nneuron_tot, self.nt, device=self.device)
             
             # Initialize the latents_readout and time_varying_coef_offset
             ###############################################
             if initialized_with_gt:
                 # self.latents_readout = nn.Parameter(torch.from_numpy(project_w).float().to(device))
                 self.latents_readout = nn.Parameter(torch.zeros(self.npop, self.npop, self.nlatent, device=self.device))
-                with torch.no_grad():
-                    for i in range(self.npop):
-                        self.latents_readout[0,i,0] = project_w[0,i,0]
-                        
                 self.time_varying_coef_offset = nn.Parameter(torch.zeros(self.npop, self.npop, 1, 1, device=device))
                 with torch.no_grad():
                     for i in range(self.npop):
+                        self.latents_readout[0,i,0] = project_w[0,i,0]
                         self.time_varying_coef_offset[0,i,0,0] = gt_latent_params['offset']
             else:
                 self.latents_readout = nn.Parameter(0.01 * (torch.randn(self.npop, self.npop, self.nlatent, device=self.device) * 2 - 1))
@@ -101,75 +105,71 @@ class FC_GPFA(nn.Module):
             
             self.beta_coupling = nn.ModuleList([
                 nn.ParameterList([
-                    nn.Parameter(0.2*torch.ones(basis_coupling.shape[1], self.nneuron[ipop], self.nneuron[jpop], 
-                                              device=self.device))
+                        nn.Parameter(0.2*torch.ones(basis_coupling.shape[1], self.nsubspace, device=self.device))
+                    for jpop in range(self.npop)])
+                for ipop in range(self.npop)])
+            
+            self.weight_sending = nn.ModuleList([
+                nn.ParameterList([
+                        nn.Parameter(1/np.sqrt(self.nneuron_list[ipop]*self.nsubspace)*\
+                            torch.ones(self.nneuron_list[ipop], self.nsubspace, device=self.device))
+                    for jpop in range(self.npop)])
+                for ipop in range(self.npop)])
+            
+            self.weight_receiving = nn.ModuleList([
+                nn.ParameterList([
+                        nn.Parameter(1/np.sqrt(self.nneuron_list[jpop]*self.nsubspace)*\
+                            torch.ones(self.nneuron_list[jpop], self.nsubspace, device=self.device))
                     for jpop in range(self.npop)])
                 for ipop in range(self.npop)])
             
             self.beta_inhomo = nn.ParameterList([
-                nn.Parameter(torch.unsqueeze(torch.unsqueeze(self.spikes[jpop].mean(axis=(0,2)), 0), 2))
+                nn.Parameter(self.spikes[jpop].mean(axis=(0,2))[None,:,None])
                 for jpop in range(self.npop)])
             
-            self.coupling_filters = [[torch.einsum('ij,jkl->ikl', self.basis_coupling, self.beta_coupling[ipop][jpop]).transpose(0,1)
-                for jpop in range(self.npop)] for ipop in range(self.npop)]
-        
-    def normalize(self):
-        # Normalize the nonidentifiable parameters
-        with torch.no_grad():
-
-            for ipop in range(self.npop):
-                for jpop in range(self.npop):
-                    # beta_coupling need to have unit norm and overall positive
-                    ratio = (1/torch.sqrt(self.beta_coupling[ipop][jpop].pow(2).sum()))**(1e-1)\
-                        *(1 if self.beta_coupling[ipop][jpop].mean()>=0 else -1)
-                    assert ratio != 0, ValueError("Ratio shouldn't be zero when normalizing beta_coupling.")
-                    self.beta_coupling[ipop][jpop] *= ratio
-                    self.latents_readout[ipop, jpop, :] *= 1/ratio
-                    self.time_varying_coef_offset[ipop, jpop, :,:] *= 1/ratio
-                    
-            # latents_readout need to have unit norm
-            # self.latents_readout *= 1/torch.sqrt(self.latents_readout.pow(2).sum())
-
+            # self.coupling_filters = [[torch.einsum('ij,jkl->ikl', self.basis_coupling, self.beta_coupling[ipop][jpop]).transpose(0,1)
+            #     for jpop in range(self.npop)] for ipop in range(self.npop)]
     
-    def get_ci(self, alpha=0.05):
-        self.std = torch.sqrt(torch.diagonal(-torch.linalg.inv(self.hessian), dim1=-2, dim2=-1))
-        z = scipy.stats.norm.ppf(1-alpha/2)
-        self.ci = [self.mu - z * self.std, self.mu + z * self.std]
-        self.ci_time_varying_coef = [torch.einsum('ijl,mlt -> ijmt', self.latents_readout, self.ci[0]) + self.time_varying_coef_offset, 
-                                     torch.einsum('ijl,mlt -> ijmt', self.latents_readout, self.ci[1]) + self.time_varying_coef_offset]
-        
     def forward(self):
         
         # basis_coupling, beta_coupling -> coupling_filters
-        self.coupling_filters = [[torch.einsum('ab,bij->aij', self.basis_coupling, self.beta_coupling[ipop][jpop]).transpose(0,1)
+        self.coupling_filters = [[torch.einsum('tb,bs->ts', self.basis_coupling, self.beta_coupling[ipop][jpop])
             for jpop in range(self.npop)] for ipop in range(self.npop)]
+        
         # Generate time-varying coupling strength coefficients
         # self.time_varying_coef = torch.einsum('ijl,lmt -> ijmt', self.latents_readout, self.latents) + gt_latent_params['offset']
         self.time_varying_coef = torch.einsum('ijl,mlt -> ijmt', self.latents_readout, self.latents) + self.time_varying_coef_offset
 
-        # coupling_filters, spike trains, time_varying_coef (total coupling effects) -> log_firing_rate
-        self.log_firing_rate = [torch.zeros(self.ntrial, self.nneuron[jpop], self.nt, device=self.device) 
+        # coupling_outputs in subspace, weight_receving, time_varying_coef (total coupling effects) -> log_firing_rate
+        self.log_firing_rate = [torch.zeros(self.ntrial, self.nneuron_list[jpop], self.nt, device=self.device) 
                                 for jpop in range(self.npop)]
         for jpop in range(self.npop):
             for ipop in range(self.npop):
                 if ipop == jpop:
                     continue
-                self.log_firing_rate[jpop] += conv(self.spikes[ipop], self.coupling_filters[ipop][jpop], 
-                    npadding=self.npadding).sum(axis=1) *torch.unsqueeze(self.time_varying_coef[ipop, jpop, :, :], 1)
+                # spikes(mit), coupling_filters(ts), weight_sending(is) -> coupling_outputs in subspace(mst)
+                self.coupling_outputs_subspace[ipop][jpop] = torch.einsum('mist,is->mst', 
+                            conv_subspace(self.spikes[ipop], self.coupling_filters[ipop][jpop], npadding=self.npadding),
+                            self.weight_sending[ipop][jpop]
+                )
+                # print(self.coupling_outputs_subspace.shape)
+                # print(self.weight_receiving[ipop][jpop].shape)
+                self.coupling_outputs[ipop][jpop] = torch.einsum('mst,js->mjt', 
+                                                self.coupling_outputs_subspace[ipop][jpop],
+                                                self.weight_receiving[ipop][jpop],
+                )
+                self.log_firing_rate[jpop] += self.coupling_outputs[ipop][jpop] * self.time_varying_coef[ipop, jpop, :, None, :]
         
         # inhomo -> log_firing_rate
-        for jpop in range(self.npop):
-            ###############################################
-            self.log_firing_rate[jpop] += self.beta_inhomo[jpop]
-            # self.log_firing_rate[jpop] += np.log(gt_neuron_params['baseline_fr'])
-            ###############################################
-            
+        ###############################################
+        if self.use_gt_offset:
+            for jpop in range(self.npop):
+                self.log_firing_rate[jpop] += np.log(gt_neuron_params['baseline_fr'])
+        else:
+            for jpop in range(self.npop):
+                self.log_firing_rate[jpop] += self.beta_inhomo[jpop]
+        ###############################################
         return self.log_firing_rate
-    
-    def get_loss(self):
-        with torch.no_grad():
-            loss = model.m_step(only_get_loss=True)
-        return loss
     
     def m_step(self, lr=1e-1, max_iter=1000, tol=1e-4, only_get_loss=False, verbose=False):
         ### Define loss function and optimizer
@@ -181,19 +181,18 @@ class FC_GPFA(nn.Module):
         print_epoch = (max(1,int(max_iter/10)))
         
         for epoch in (range(max_iter)):
-            self.normalize()
+            # self.normalize()
             self.optimizer.zero_grad()
             outputs = self()
-            # plt.plot(model.log_firing_rate[1].detach().cpu().numpy()[0,0,:])
             loss = 0
             # loss += huber_loss_parameter*huber_loss(model.latents_readout, huber_loss_zeros)
             
             for i in range(len(outputs)):
                 # print()
                 loss += self.criterion(outputs[i], self.spikes[i][:,:,gt_neuron_params['npadding']:])
-                
                 # for j in range(len(outputs)):
                 #     loss += PENAL_beta_coupling*model.beta_coupling[i][j].pow(2).sum()
+                
             if only_get_loss:
                 return loss
             loss.backward()
@@ -220,21 +219,17 @@ class FC_GPFA(nn.Module):
     def e_step(self, lr=1e-2, max_iter=10, tol=1e-2, verbose=False):
         # Get the best latents under the current model
         with torch.no_grad():
-            # basis_coupling, beta_coupling -> coupling_filters
-            self.coupling_filters = [[
-                torch.einsum('ab,bij->aij', self.basis_coupling, self.beta_coupling[ipop][jpop]).transpose(0,1)
-                for jpop in range(self.npop)] for ipop in range(self.npop)]
-            # coupling_outputs: mn(j)t
-            self.coupling_outputs = [[conv(self.spikes[ipop], self.coupling_filters[ipop][jpop], 
-                npadding=self.npadding).sum(axis=1) for jpop in range(self.npop)] for ipop in range(self.npop)]
+            outputs = self()
             # weight: mnlt
             # bias: mnt
-            weight = torch.zeros(self.ntrial, self.tot_neuron, self.nlatent, self.nt, device=self.device)
+            weight = torch.zeros(self.ntrial, self.nneuron_tot, self.nlatent, self.nt, device=self.device)
             ###############################################
-            # bias = np.log(gt_neuron_params['baseline_fr'])*torch.ones(self.ntrial, self.tot_neuron, self.nt, device=self.device)
-            bias = torch.ones(self.ntrial, self.tot_neuron, self.nt, device=self.device)
-            for jpop in range(self.npop):
-                bias[:, self.accnneuron[jpop]:self.accnneuron[jpop+1], :] *= self.beta_inhomo[jpop]
+            if self.use_gt_offset:
+                bias = np.log(gt_neuron_params['baseline_fr'])*torch.ones(self.ntrial, self.nneuron_tot, self.nt, device=self.device)
+            else:
+                bias = torch.zeros(self.ntrial, self.nneuron_tot, self.nt, device=self.device)
+                for jpop in range(self.npop):
+                    bias[:, self.accnneuron[jpop]:self.accnneuron[jpop+1], :] += self.beta_inhomo[jpop]
             ###############################################
             for ipop in range(self.npop):
                 for jpop in range(self.npop):
@@ -251,12 +246,55 @@ class FC_GPFA(nn.Module):
                                                                         lr=lr, max_iter=max_iter, tol=tol, verbose=verbose)
             self.latents = self.mu
         return self.elbo
+    
+    def get_loss(self):
+        with torch.no_grad():
+            loss = self.m_step(only_get_loss=True)
+        return loss
+    
+    def normalize(self):
+        # Normalize the nonidentifiable parameters
+        with torch.no_grad():
+            for ipop in range(self.npop):
+                for jpop in range(self.npop):
+                    # beta_coupling need to have unit norm and overall positive
+                    ratio = (1/torch.sqrt(self.beta_coupling[ipop][jpop].pow(2).sum()))**(1e-1)\
+                        *(1 if self.beta_coupling[ipop][jpop].mean()>=0 else -1)
+                    assert ratio != 0, ValueError("Ratio shouldn't be zero when normalizing beta_coupling.")
+                    self.beta_coupling[ipop][jpop] *= ratio
+                    self.latents_readout[ipop, jpop, :] *= 1/ratio
+                    self.time_varying_coef_offset[ipop, jpop, :,:] *= 1/ratio
+                    
+                    # weight_sending need to have unit norm and overall positive
+                    ratio = (1/torch.sqrt(self.weight_sending[ipop][jpop].pow(2).sum()))**(1e-1)\
+                        *(1 if self.weight_sending[ipop][jpop].mean()>=0 else -1)
+                    assert ratio != 0, ValueError("Ratio shouldn't be zero when normalizing beta_coupling.")
+                    self.weight_sending[ipop][jpop] *= ratio
+                    self.latents_readout[ipop, jpop, :] *= 1/ratio
+                    self.time_varying_coef_offset[ipop, jpop, :,:] *= 1/ratio
+                    
+                    # weight_receiving need to have unit norm and overall positive
+                    ratio = (1/torch.sqrt(self.weight_receiving[ipop][jpop].pow(2).sum()))**(1e-1)\
+                        *(1 if self.weight_receiving[ipop][jpop].mean()>=0 else -1)
+                    assert ratio != 0, ValueError("Ratio shouldn't be zero when normalizing beta_coupling.")
+                    self.weight_receiving[ipop][jpop] *= ratio
+                    self.latents_readout[ipop, jpop, :] *= 1/ratio
+                    self.time_varying_coef_offset[ipop, jpop, :,:] *= 1/ratio
+                    
+    def get_ci(self, alpha=0.05):
+        self.std = torch.sqrt(torch.diagonal(-torch.linalg.inv(self.hessian), dim1=-2, dim2=-1))
+        z = scipy.stats.norm.ppf(1-alpha/2)
+        self.ci = [self.mu - z * self.std, self.mu + z * self.std]
+        self.ci_time_varying_coef = [
+            torch.einsum('ijl,mlt -> ijmt', self.latents_readout, self.ci[0]) + self.time_varying_coef_offset, 
+            torch.einsum('ijl,mlt -> ijmt', self.latents_readout, self.ci[1]) + self.time_varying_coef_offset
+            ]
 
 
 #%% Define decoder algorithm
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
-                                     bias=None, lr=2e-1, max_iter=10, tol=1e-2, 
-                                     print_iter=1, verbose=False):
+                            bias=None, lr=2e-1, max_iter=10, tol=1e-2, 
+                            print_iter=1, verbose=False):
     """
     Performs fixed weights GPFA with Poisson observations.
 

@@ -22,13 +22,14 @@ ckp_path = path_prefix+'/qix/user_data/FC-GPFA_checkpoint'
 with open(path_prefix+'/qix/user_data/allen_spike_trains/'+str(session_id)+'.pkl', 'rb') as f:
     spikes = pickle.load(f)
 
-# Only use 0-500ms
-spikes = [sp[:,:,-500:] for sp in spikes]
+# Only use 0-350ms; padding 100ms for accuate coupling effects
+npadding = 100
+spikes = [sp[:,:,-(500+npadding):-150] for sp in spikes]
 
 # score below is actually the best test loss achieve when training the model, so the lower the better
 best_score = [float('inf')]
 def try_hp(params):
-    trainer = Trainer(spikes, ckp_path, params)
+    trainer = Trainer(spikes, ckp_path, params, npadding=npadding)
     try:
         score = trainer.train(verbose=False, record_results=True)
         if score < best_score[0]:
@@ -53,15 +54,22 @@ param_dist = {
     'nhead': hp.choice('nhead', [1, 2]),
     'learning_rate': hp.choice('learning_rate', [1e-4, 1e-3, 1e-2]),
     'learning_rate_decoder': hp.choice('learning_rate_decoder', [1e-3, 1e-2, 1e-1]),
+    'learning_rate_cp': hp.choice('learning_rate_cp', [1e-3, 1e-2, 1e-1]),
     'dropout': hp.choice('dropout', [0, 0.1, 0.2, 0.3, 0.5]),
     'beta': hp.choice('beta', [0.0, 0.1, 0.4, 1.0]),
-    'warm_up_epoch': hp.choice('warm_up_epoch', [5]),
-    'max_epoch': hp.choice('max_epoch', [300]),
-    'patience_epoch': hp.choice('patience_epoch', [5]),
+    'epoch_warm_up': hp.choice('warm_up_epoch', [5]),
+    'epoch_fix_latent': hp.choice('fix_latent_epoch', [10, 20, 50, 100]),
+    'epoch_max': hp.choice('max_epoch', [300]),
+    'epoch_patience': hp.choice('patience_epoch', [5]),
     'sample_latent': hp.choice('sample_latent', [True, False]),
     'decoder_architecture': hp.choice('decoder_architecture', [0, 1, 2]),
+    'nsubspace':hp.choice('decoder_architecture', [1, 2, 4]),
+    'K_tau': hp.choice('K_tau', [50, 100, 200, 300, 400]),
+    'K_sigma2': hp.choice('K_sigma2', [0.25, 1.0, 4.0, 16.0]),
+    'nlatent': hp.choice('nlatent', [1, 2, 4, 8]),
+    'coupling_basis_num': hp.choice('coupling_basis_num', [3, 5, 8]),
+    'coupling_basis_peaks_max': hp.choice('coupling_basis_peaks_max', [5, 10.2, 15]),
 }
-
 
 # Create a trials object to store details of each iteration
 trials = Trials()

@@ -1547,7 +1547,7 @@ def poisson_regression(
         penalty_vec[no_penalty_term] = no_penalty_term_penalty
     penalty_matrix = np.diag(penalty_vec.squeeze())
     ### Second order difference matrix
-    X_average = X.reshape(-1, 500, num_predictor).mean(axis=0)
+    X_average = X.reshape(-1, 350, num_predictor).mean(axis=0)
     # X_average = X[:500,:]
     D = np.diag(np.ones(X_average.shape[0]-1), k=-1) + np.diag(-2*np.ones(X_average.shape[0]), k=0) \
         + np.diag(np.ones(X_average.shape[0]-1), k=1)
