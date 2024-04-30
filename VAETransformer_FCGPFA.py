@@ -4,6 +4,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import torch.distributions as dist
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 class VAETransformer_FCGPFA(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
@@ -68,7 +69,7 @@ class VAETransformer_FCGPFA(nn.Module):
         
         # DO gradient descent on these parameters
         self.cp_latents_readout = nn.Parameter(0.01 * (torch.randn(self.narea, self.narea, self.nlatent) * 2 - 1))
-        self.cp_time_varying_coef_offset = nn.Parameter(0.1 * (torch.ones(self.narea, self.narea, 1, 1)))
+        self.cp_time_varying_coef_offset = nn.Parameter(1 * (torch.ones(self.narea, self.narea, 1, 1)))
         
         self.cp_beta_coupling = nn.ModuleList([
             nn.ParameterList([
@@ -90,11 +91,11 @@ class VAETransformer_FCGPFA(nn.Module):
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
 
-    def get_latents(self, lr=1e-2, max_iter=10, tol=1e-2, verbose=False, fix_latents=False):
+    def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
         if fix_latents:
-            self.latents = torch.ones(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
-            self.latents[:,:,:150] = -1
+            self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            # self.latents[:,:,:150] = -1
             return None
         # Get the best latents under the current model
         with torch.no_grad():
@@ -116,11 +117,12 @@ class VAETransformer_FCGPFA(nn.Module):
                         self.cp_time_varying_coef_offset[iarea, jarea, 0, 0]
                     )
 
-            self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
-                self.spikes_full[:,:,self.npadding:], weight, self.K, 
-                initial_mu=self.mu, initial_hessian=self.hessian, bias=bias, 
-                lr=lr, max_iter=max_iter, tol=tol, verbose=verbose)
-            self.latents = self.mu
+        self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
+            self.spikes_full[:,:,self.npadding:], weight, self.K, 
+            initial_mu=None, initial_hessian=None, bias=bias, 
+            lr=lr, max_iter=max_iter, tol=tol, verbose=True)
+        self.latents = self.mu
+
         return self.elbo
     
     def get_coupling_outputs(self):
@@ -255,7 +257,7 @@ class PositionalEncoding(nn.Module):
     
 #%% Define decoder algorithm
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
-                            bias=None, lr=2e-1, max_iter=10, tol=1e-2, 
+                            bias=None, lr=5e-1, max_iter=100, tol=1e-2, 
                             print_iter=1, verbose=False):
     """
     Performs fixed weights GPFA with Poisson observations.
@@ -320,6 +322,18 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         # print(weights)
         # print(f"log_lambd.max():{log_lambd.max()}")
         # print(f"torch.sum(lambd):{torch.sum(lambd)}")
+        if np.abs(loss.item())>1e7:
+            pass
+            # raise ValueError('Loss is too big')
+        if np.isnan(loss.item()):
+            print(i)
+            plt.plot(log_lambd[:, :, :].cpu().numpy().max(axis=(0,1)).T)
+            plt.plot(log_lambd[:, :, :].cpu().numpy().min(axis=(0,1)).T)
+            plt.figure()
+            plt.plot(mu[:, 0, :].cpu().numpy().T)
+            raise ValueError('Loss is NaN')
+            
+        
         if verbose and i % print_iter == 0:
             print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
             # plt.plot(mu[0, 0, :].cpu().numpy(), label=f'Iteration {i+1}')

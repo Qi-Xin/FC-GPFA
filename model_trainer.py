@@ -60,7 +60,7 @@ class Trainer:
                                                         batch_size=self.params['batch_size'], 
                                                         shuffle=False)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, 
-                                                       batch_size=self.params['batch_size'], 
+                                                       batch_size=split, 
                                                        shuffle=False)
         if verbose:
             print(f"Data processed. Train set size: {len(train_dataset)}, Test set size: {len(test_dataset)}")
