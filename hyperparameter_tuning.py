@@ -56,6 +56,7 @@ param_dist = {
     'learning_rate_decoder': hp.choice('learning_rate_decoder', [1e-3, 1e-2, 1e-1]),
     'learning_rate_cp': hp.choice('learning_rate_cp', [1e-3, 1e-2, 1e-1]),
     'dropout': hp.choice('dropout', [0, 0.1, 0.2, 0.3, 0.5]),
+    'decay': hp.choice('decay', [0.0, 0.1, 0.2, 0.5]),
     'beta': hp.choice('beta', [0.0, 0.1, 0.4, 1.0]),
     'epoch_warm_up': hp.choice('warm_up_epoch', [5]),
     'epoch_fix_latent': hp.choice('fix_latent_epoch', [10, 20, 50, 100]),

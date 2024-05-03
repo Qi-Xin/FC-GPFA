@@ -101,21 +101,22 @@ class Trainer:
         standard_lr = self.params['learning_rate']
         decoder_lr = self.params['learning_rate_decoder']  # Higher learning rate for decoder_matrix
         cp_lr = self.params['learning_rate_cp']  # Learning rate for coupling parameters
+        weight_decay = self.params['weight_decay']
 
         # Configure optimizer with two parameter groups
         self.optimizer = optim.Adam([
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('decoder_fc' not in n and 'cp' not in n)], 
+                        if ('cp' not in n and 'decoder_fc' not in n)], 
              'lr': standard_lr},
             {'params': self.model.decoder_fc.parameters(), 
              'lr': decoder_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('decoder_fc' not in n and ('cp' in n and 'weight' not in n))], 
+                        if ('cp' in n and 'weight' not in n)], 
              'lr': cp_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('decoder_fc' not in n and ('cp' in n and 'weight' in n))], 
+                        if ('cp' in n and 'weight' in n)], 
              'lr': cp_lr},
-        ])
+        ], weight_decay=weight_decay)
         ################################
         if verbose:
             print(f"Model initialized. Training on {self.device}")

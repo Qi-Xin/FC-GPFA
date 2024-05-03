@@ -73,7 +73,7 @@ class VAETransformer_FCGPFA(nn.Module):
         
         self.cp_beta_coupling = nn.ModuleList([
             nn.ParameterList([
-                    nn.Parameter(0.2*torch.ones(coupling_basis.shape[1], self.nsubspace))
+                    nn.Parameter(0.1*torch.ones(coupling_basis.shape[1], self.nsubspace))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
         
