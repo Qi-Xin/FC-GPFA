@@ -2165,7 +2165,6 @@ def get_statistics_null_excursion(V1, membership, condition_ids, fix_peak_time):
     
     return record_filter, record_output
 
-
 ### Multiprocess version of null distribution
 def get_statistics_null_mp(n_null, V1, membership, condition_ids, fix_peak_time):
     """Get the distribution of test statistics (excursion test) under the null hypothesis. 

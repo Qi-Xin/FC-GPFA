@@ -7,6 +7,7 @@ import numpy as np
 from VAETransformer_FCGPFA import VAETransformer_FCGPFA, get_K
 import utility_functions as utils
 import GLM
+import matplotlib.pyplot as plt
 
 '''
 First, load data "spikes", set path, set hyperparameters, and use these three to create a Trainer object.
@@ -109,7 +110,10 @@ class Trainer:
             {'params': self.model.decoder_fc.parameters(), 
              'lr': decoder_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('decoder_fc' not in n and 'cp' in n)], 
+                        if ('decoder_fc' not in n and ('cp' in n and 'weight' not in n))], 
+             'lr': cp_lr},
+            {'params': [p for n, p in self.model.named_parameters() 
+                        if ('decoder_fc' not in n and ('cp' in n and 'weight' in n))], 
              'lr': cp_lr},
         ])
         ################################
@@ -171,6 +175,10 @@ class Trainer:
                                                     mu, logvar, beta=0.0)
                     test_loss += loss.item() * spikes_full_batch.size(0)
             test_loss /= len(self.test_loader.dataset)
+            
+            # if epoch % 5 == 2:
+            #     plt.figure()
+            #     plt.plot(self.model.latents[:, 0, :].cpu().numpy().T)
 
             if verbose:
                 print(f"Epoch {epoch+1}/{self.params['epoch_max']}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}")
@@ -217,7 +225,7 @@ class Trainer:
                 spikes_full_batch = spikes_full_batch.to(self.device)
                 firing_rate, z, mu, logvar = self.model(spikes_full_low_res_batch, 
                                                         spikes_full_batch, 
-                                                        fix_latents=True)
+                                                        fix_latents=False)
                 mu_list.append(mu)
                 std_list.append(torch.exp(0.5 * logvar))
                 firing_rate_list.append(firing_rate)

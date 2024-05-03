@@ -91,11 +91,13 @@ class VAETransformer_FCGPFA(nn.Module):
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
 
+
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
         if fix_latents:
-            self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
-            # self.latents[:,:,:150] = -1
+            # self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            self.latents = torch.ones(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            self.latents[:,:,:150] = -1
             return None
         # Get the best latents under the current model
         with torch.no_grad():
@@ -120,7 +122,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
             self.spikes_full[:,:,self.npadding:], weight, self.K, 
             initial_mu=None, initial_hessian=None, bias=bias, 
-            lr=lr, max_iter=max_iter, tol=tol, verbose=True)
+            lr=lr, max_iter=max_iter, tol=tol, verbose=False)
         self.latents = self.mu
 
         return self.elbo
@@ -171,13 +173,26 @@ class VAETransformer_FCGPFA(nn.Module):
         z = self.sample_a_latent(mu, logvar)
         self.firing_rates_stimulus = self.decode(z)
         
-        ### FCGPFA's forward pass
+        '''
+        ### FCGPFA's forward pass (when fix_latents is True, latents is fixed)
         # Get latents
         self.get_coupling_outputs()
         self.get_latents(fix_latents=fix_latents)
         self.get_firing_rates_coupling()
-        
         self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
+        return self.firing_rates_combined, z, mu, logvar
+        '''
+    
+        ### FCGPFA's forward pass 
+        ### (when fix_latents is True, stimulus effect is zero and only update coupling effects)
+        # Get latents
+        self.get_coupling_outputs()
+        self.get_latents(fix_latents=False)
+        self.get_firing_rates_coupling()
+        if fix_latents:
+            self.firing_rates_combined = self.firing_rates_coupling-5
+        else:
+            self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
         return self.firing_rates_combined, z, mu, logvar
     
     def encode(self, src):
@@ -257,8 +272,8 @@ class PositionalEncoding(nn.Module):
     
 #%% Define decoder algorithm
 def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=None, 
-                            bias=None, lr=5e-1, max_iter=100, tol=1e-2, 
-                            print_iter=1, verbose=False):
+                            bias=None, lr=5e-1, max_iter=500, tol=1e-2, 
+                            print_iter=1, verbose=False, use_loss_to_stop=True):
     """
     Performs fixed weights GPFA with Poisson observations.
 
@@ -305,62 +320,90 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
     flag = False
 
     for i in (range(max_iter)):
+        
         # Updated log_lambd calculation to handle the new shape of weights
         log_lambd = torch.einsum('mnlt,mlt->mnt', weights, mu) + bias
         # lambd = torch.exp(log_lambd)
+        # hessian += torch.eye(nt, device=device).unsqueeze(0).unsqueeze(0) * 1e-3
         hessian_inv = torch.linalg.inv(hessian)
         # lambd = torch.exp(log_lambd)
-        lambd = torch.exp(log_lambd + 1/2*(torch.diagonal(hessian_inv, dim1=-2, dim2=-1).unsqueeze(1)*weights**2).sum(axis=2))
+        lambd = torch.exp(
+            torch.clamp(
+                log_lambd + 1/2*(torch.diagonal(hessian_inv, dim1=-2, dim2=-1).unsqueeze(1)*weights**2).sum(axis=2), 
+                max=30)
+            )
         inv_K_times_hessian_inv = inv_K@hessian_inv
-        # print((torch.einsum('mlt,mlt->mlt', mu@inv_K, mu)).shape)
-        # print(1/2*(mu@inv_K@mu.T).shape)
-        # loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()
-        loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
-            - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
-                + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
-        # print(loss)
-        # print(weights)
-        # print(f"log_lambd.max():{log_lambd.max()}")
-        # print(f"torch.sum(lambd):{torch.sum(lambd)}")
-        if np.abs(loss.item())>1e7:
-            pass
-            # raise ValueError('Loss is too big')
-        if np.isnan(loss.item()):
-            print(i)
-            plt.plot(log_lambd[:, :, :].cpu().numpy().max(axis=(0,1)).T)
-            plt.plot(log_lambd[:, :, :].cpu().numpy().min(axis=(0,1)).T)
-            plt.figure()
-            plt.plot(mu[:, 0, :].cpu().numpy().T)
-            raise ValueError('Loss is NaN')
-            
+
         
-        if verbose and i % print_iter == 0:
-            print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
-            # plt.plot(mu[0, 0, :].cpu().numpy(), label=f'Iteration {i+1}')
-            # plt.legend()
-        if loss.item() - loss_old < tol and i >= 1 :
-            flag = True
-            if verbose:
-                print(f'Converged at iteration {i} with loss {loss.item()}')
-            break
+        ##############################
+        if use_loss_to_stop:
+            loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
+                - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
+                    + 1/2*torch.log((torch.det(inv_K_times_hessian_inv)+1e-10)).sum() - nt
+                    # + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
+
+            if np.abs(loss.item())>1e7:
+                pass
+                # raise ValueError('Loss is too big')
+            if loss.item()==float('inf') or torch.isnan(loss):
+                print(i)
+                print(loss.item())
+                print(torch.sum(Y * log_lambd))
+                print(torch.sum(lambd))
+                print(1/2*(mu@inv_K*mu).sum())
+                print(1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum())
+                print(1/2*torch.log(torch.relu(torch.det(inv_K_times_hessian_inv))).sum())
+                raise ValueError('Loss is NaN')
+            
+            if verbose and i % print_iter == 0:
+                print(f'Iteration {i}: Loss change {loss.item() - loss_old}')
+
+            if loss.item() - loss_old < tol and i >= 1 :
+                flag = True
+                if verbose:
+                    print(f'Converged at iteration {i} with loss {loss.item()}')
+                break
+            
+            loss_old = loss.item()
+        ###############################
 
         # Update gradient calculation
         grad = torch.einsum('mnlt,mnt->mlt', weights, Y - lambd) - torch.matmul(mu, inv_K)
         
         # Update Hessian calculation to reflect the new dimensions and calculations
         hessian = -inv_K.unsqueeze(0).unsqueeze(0) - make_4d_diagonal(torch.einsum('mnlt,mnt->mlt', weights**2, lambd))
+        # if torch.linalg.matrix_rank(hessian[0,0,:,:]) < nt:
+        #     raise ValueError('Rank of hessian is not full')
         mu_update = torch.linalg.solve(hessian, grad.unsqueeze(-1)).squeeze(-1)
         # mu_update = torch.linalg.lstsq(hessian, grad.unsqueeze(-1)).solution.squeeze(-1)
         mu_new = mu - lr * mu_update
 
-        loss_old = loss.item()
+        if torch.isnan(mu_update).any():
+            plt.plot(mu[:,0,:].cpu().numpy().T)
+            print(torch.isnan(torch.linalg.lstsq(hessian, grad.unsqueeze(-1)).solution.squeeze(-1)).any())
+            print(hessian[0,0,:,:])
+            ranks = torch.tensor([torch.linalg.matrix_rank(hessian[i,0,:,:]) for i in range(hessian.shape[0])])
+            print(f"rank of hessian: {ranks}")
+            ranks = torch.tensor([torch.linalg.matrix_rank(1e5*torch.eye(hessian.shape[-1],device=hessian.device)+hessian[i,0,:,:]) 
+                     for i in range(hessian.shape[0])])
+            print(f"rank of hessian: {ranks}")
+            raise ValueError('NaN in mu_new')
+        
+        #############################
+        if not use_loss_to_stop:
 
-        # if torch.norm(lr * mu_update) < tol:
-        #     flag = True
-        #     if verbose:
-        #         print(f'Converged at iteration {i} with loss {loss.item()}')
-        #     break
+            if torch.norm(lr * mu_update) < tol:
+                flag = True
+                if verbose:
+                    loss = torch.sum(Y * log_lambd) - torch.sum(lambd) - 1/2*(mu@inv_K*mu).sum()\
+                        - 1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum()\
+                            + 1/2*torch.log(torch.relu(torch.det(inv_K_times_hessian_inv))).sum() - nt
+                    print(f'Converged at iteration {i} with loss {loss.item()}')
+                break
+        
+        #############################
         mu = mu_new
+
         
         # # Record mu in each iteration
         # mu_record.append(mu.clone().detach())
@@ -373,6 +416,8 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         
     if flag is False:
         print(f'Not Converged with norm {torch.norm(lr * mu_update)} at the last iteration')
+        raise ValueError('Not Converged')
+    
     return mu, hessian, lambd, loss.item()
 
 def get_K(sigma2=1.0, L=100.0, nt=500, use_torch=False, device='cpu'):
