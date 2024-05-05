@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 class VAETransformer_FCGPFA(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
                  nhead, decoder_architecture, 
-                 npadding, nsubspace, K, nlatent, coupling_basis):
+                 npadding, nsubspace, K, nlatent, coupling_basis, use_self_coupling):
         super(VAETransformer_FCGPFA, self).__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
         self.d_model = sum(self.nneuron_list)
@@ -28,6 +28,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.nsubspace = nsubspace
         self.K = K
         self.nlatent = nlatent
+        self.use_self_coupling = use_self_coupling
 
         ### VAETransformer's parameters
         self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
@@ -68,26 +69,29 @@ class VAETransformer_FCGPFA(nn.Module):
         self.coupling_basis = coupling_basis
         
         # DO gradient descent on these parameters
-        self.cp_latents_readout = nn.Parameter(0.01 * (torch.randn(self.narea, self.narea, self.nlatent) * 2 - 1))
-        self.cp_time_varying_coef_offset = nn.Parameter(1 * (torch.ones(self.narea, self.narea, 1, 1)))
+        self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.nlatent) * 2 - 1))
+        self.cp_time_varying_coef_offset = nn.Parameter(1.0 * (torch.ones(self.narea, self.narea, 1, 1)))
         
         self.cp_beta_coupling = nn.ModuleList([
             nn.ParameterList([
-                    nn.Parameter(0.1*torch.ones(coupling_basis.shape[1], self.nsubspace))
+                    nn.Parameter(1.0*(torch.ones(coupling_basis.shape[1], self.nsubspace)+\
+                        0.1*torch.randn(coupling_basis.shape[1], self.nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
         
         self.cp_weight_sending = nn.ModuleList([
             nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.nsubspace)*\
-                        torch.ones(self.nneuron_list[iarea], self.nsubspace))
+                        (torch.ones(self.nneuron_list[iarea], self.nsubspace)+\
+                            0.1*torch.randn(self.nneuron_list[iarea], self.nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
         
         self.cp_weight_receiving = nn.ModuleList([
             nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.nsubspace)*\
-                        torch.ones(self.nneuron_list[jarea], self.nsubspace))
+                        (torch.ones(self.nneuron_list[jarea], self.nsubspace)+\
+                            0.1*torch.randn(self.nneuron_list[jarea], self.nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
 
@@ -108,16 +112,21 @@ class VAETransformer_FCGPFA(nn.Module):
             bias += self.firing_rates_stimulus
             for iarea in range(self.narea):
                 for jarea in range(self.narea):
-                    if iarea == jarea:
-                        continue
-                    weight[:, self.accnneuron[jarea]:self.accnneuron[jarea+1], :, :] += (
-                        self.coupling_outputs[iarea][jarea][:, :, None, :] *
-                        self.cp_latents_readout[None, None, iarea, jarea, :, None]
-                    )
-                    bias[:, self.accnneuron[jarea]:self.accnneuron[jarea+1], :] += (
-                        self.coupling_outputs[iarea][jarea] *
-                        self.cp_time_varying_coef_offset[iarea, jarea, 0, 0]
-                    )
+                    # if iarea != jarea, then we need to update weight and bias
+                    # if iarea == jarea, then we need to update bias, if and only if use_self_coupling is True
+                    # if iarea == jarea, we never update weight no matter use_self_coupling is True or False
+                    if iarea != jarea:
+                        weight[:, self.accnneuron[jarea]:self.accnneuron[jarea+1], :, :] += (
+                            self.coupling_outputs[iarea][jarea][:, :, None, :] *
+                            self.cp_latents_readout[None, None, iarea, jarea, :, None]
+                        )
+                    if iarea != jarea or self.use_self_coupling:
+                        bias[:, self.accnneuron[jarea]:self.accnneuron[jarea+1], :] += (
+                            self.coupling_outputs[iarea][jarea] *
+                            self.cp_time_varying_coef_offset[iarea, jarea, 0, 0]
+                        )
+                    
+                        
 
         self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
             self.spikes_full[:,:,self.npadding:], weight, self.K, 
@@ -134,7 +143,7 @@ class VAETransformer_FCGPFA(nn.Module):
 
         for jarea in range(self.narea):
             for iarea in range(self.narea):
-                if iarea == jarea:
+                if not self.use_self_coupling and iarea == jarea:
                     continue
                 # spikes(mit), coupling_filters(ts), cp_weight_sending(is) -> coupling_outputs in subspace(mst)
                 self.coupling_outputs_subspace[iarea][jarea] = torch.einsum(
@@ -160,7 +169,11 @@ class VAETransformer_FCGPFA(nn.Module):
         for jarea in range(self.narea):
             for iarea in range(self.narea):
                 if iarea == jarea:
-                    continue
+                    if self.use_self_coupling:
+                        self.firing_rates_coupling[:,self.accnneuron[jarea]:self.accnneuron[jarea+1],:] += \
+                            self.coupling_outputs[iarea][jarea]
+                    else:
+                        continue
                 self.firing_rates_coupling[:,self.accnneuron[jarea]:self.accnneuron[jarea+1],:] += \
                     self.coupling_outputs[iarea][jarea] * self.time_varying_coef[iarea, jarea, :, None, :]
 
@@ -174,7 +187,8 @@ class VAETransformer_FCGPFA(nn.Module):
         self.firing_rates_stimulus = self.decode(z)
         
         '''
-        ### FCGPFA's forward pass (when fix_latents is True, latents is fixed)
+        ### FCGPFA's forward pass 
+        ### (when fix_latents is True, latents is fixed)
         # Get latents
         self.get_coupling_outputs()
         self.get_latents(fix_latents=fix_latents)
@@ -182,7 +196,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
         return self.firing_rates_combined, z, mu, logvar
         '''
-    
+
         ### FCGPFA's forward pass 
         ### (when fix_latents is True, stimulus effect is zero and only update coupling effects)
         # Get latents
@@ -190,7 +204,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.get_latents(fix_latents=False)
         self.get_firing_rates_coupling()
         if fix_latents:
-            self.firing_rates_combined = self.firing_rates_coupling-5
+            self.firing_rates_combined = -5 + self.firing_rates_coupling
         else:
             self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
         return self.firing_rates_combined, z, mu, logvar
@@ -342,6 +356,7 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
                     + 1/2*torch.log((torch.det(inv_K_times_hessian_inv)+1e-10)).sum() - nt
                     # + 1/2*torch.logdet(inv_K_times_hessian_inv).sum() - nt
 
+            ############### For debug use ################
             if np.abs(loss.item())>1e7:
                 pass
                 # raise ValueError('Loss is too big')
@@ -354,6 +369,7 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
                 print(1/2*(torch.diagonal(inv_K_times_hessian_inv, dim1=-2, dim2=-1)).sum())
                 print(1/2*torch.log(torch.relu(torch.det(inv_K_times_hessian_inv))).sum())
                 raise ValueError('Loss is NaN')
+            ##############################################
             
             if verbose and i % print_iter == 0:
                 print(f'Iteration {i}: Loss change {loss.item() - loss_old}')

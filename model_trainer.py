@@ -92,7 +92,8 @@ class Trainer:
             nsubspace=self.params['nsubspace'], 
             K=K, 
             nlatent=self.params['nlatent'], 
-            coupling_basis=coupling_basis
+            coupling_basis=coupling_basis,
+            use_self_coupling=self.params['use_self_coupling'],
             ).to(self.device)
         ################################
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['learning_rate'])
@@ -199,7 +200,7 @@ class Trainer:
                         print('Early stopping triggered.')
                     break
         
-        # self.model.load_state_dict(torch.load(temp_best_model_path))
+        self.model.load_state_dict(torch.load(temp_best_model_path))
         if record_results:
             self.log_results(best_train_loss, best_test_loss)
         return best_test_loss

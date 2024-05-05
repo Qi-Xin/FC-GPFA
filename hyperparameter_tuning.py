@@ -70,6 +70,7 @@ param_dist = {
     'nlatent': hp.choice('nlatent', [1, 2, 4, 8]),
     'coupling_basis_num': hp.choice('coupling_basis_num', [3, 5, 8]),
     'coupling_basis_peaks_max': hp.choice('coupling_basis_peaks_max', [5, 10.2, 15]),
+    'use_self_coupling': hp.choice('use_self_coupling', [True, False]),
 }
 
 # Create a trials object to store details of each iteration
