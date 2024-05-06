@@ -246,17 +246,24 @@ class Trainer:
             'model_state_dict': self.model.state_dict(),
             'params': self.params,
         }, filename)
+        print(f"Trainer instance (model and hyperparameters) saved to {filename}")
         
     def load_model_and_hp(self, filename=None):
         if filename is None:
             print(f"Loading default model from {self.path}")
             filename = self.path + '/best_model_and_hp.pth'
-        checkpoint = torch.load(filename)
+        # checkpoint = torch.load(filename)
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        map_location = lambda storage, loc: storage.cuda() \
+            if torch.cuda.is_available() else storage.cpu()
+        checkpoint = torch.load(filename, map_location=map_location)
 
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.params = checkpoint['params']
+        self.params = checkpoint['params']        
         self.process_data()
         self.initialize_model()
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"Trainer instance (model and hyperparameters) loaded from {filename}")
 
     def log_results(self, train_loss, test_loss):
         results = {

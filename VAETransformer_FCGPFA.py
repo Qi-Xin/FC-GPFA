@@ -95,7 +95,6 @@ class VAETransformer_FCGPFA(nn.Module):
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
 
-
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
         if fix_latents:
