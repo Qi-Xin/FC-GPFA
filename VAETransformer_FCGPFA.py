@@ -5,6 +5,7 @@ import torch.distributions as dist
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.stats
 
 class VAETransformer_FCGPFA(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
@@ -175,6 +176,17 @@ class VAETransformer_FCGPFA(nn.Module):
                         continue
                 self.firing_rates_coupling[:,self.accnneuron[jarea]:self.accnneuron[jarea+1],:] += \
                     self.coupling_outputs[iarea][jarea] * self.time_varying_coef[iarea, jarea, :, None, :]
+                    
+    def get_ci(self, alpha=0.05):
+        self.std = torch.sqrt(torch.diagonal(-torch.linalg.inv(self.hessian), dim1=-2, dim2=-1))
+        z = scipy.stats.norm.ppf(1-alpha/2)
+        self.ci = [self.mu - z * self.std, self.mu + z * self.std]
+        self.ci_time_varying_coef = [
+            torch.einsum('ijl,mlt -> ijmt', self.cp_latents_readout, self.ci[0]) \
+                + self.cp_time_varying_coef_offset, 
+            torch.einsum('ijl,mlt -> ijmt', self.cp_latents_readout, self.ci[1]) \
+                + self.cp_time_varying_coef_offset
+            ]
 
     def forward(self, src, spikes_full, fix_latents=False):
         self.spikes_full = spikes_full
@@ -243,13 +255,13 @@ class VAETransformer_FCGPFA(nn.Module):
         proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
         
         # Apply spline_basis per area
-        factors = torch.einsum('mafb,tb->matf', proj, self.spline_basis)  # batch_size x narea x nt x nfactor**matf**
+        self.factors = torch.einsum('mafb,tb->matf', proj, self.spline_basis)  # batch_size x narea x nt x nfactor**matf**
         
         # Prepare to collect firing rates from each area
         firing_rates_list = []
         for i_area, readout_matrix in enumerate(self.readout_matrices):
             # Extract factors for the current area
-            area_factors = factors[:, i_area, :, :]  # batch_size x nt x nfactor (mtf)
+            area_factors = self.factors[:, i_area, :, :]  # batch_size x nt x nfactor (mtf)
             firing_rates = readout_matrix(area_factors)  # batch_size x nt x nneuron_area[i_area] (mtn)
             firing_rates_list.append(firing_rates)
 
