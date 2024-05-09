@@ -905,5 +905,6 @@ def comp_eig_D (Ks , Kt , sig2n ):
     Dvec = np. repeat ( evals_s , nt) * np. tile ( evals_t , nx) + sig2n *np. ones(nx*nt)
     return evec_s , evec_t , Dvec
 
-
+def has_key_word(name, key_word_list):
+    return any(key_word in name for key_word in key_word_list)
 

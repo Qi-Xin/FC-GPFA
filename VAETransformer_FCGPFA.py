@@ -32,7 +32,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.use_self_coupling = use_self_coupling
 
         ### VAETransformer's parameters
-        self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
+        # self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
         transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, 
                                                             nhead=self.nhead,
                                                             dim_feedforward=dim_feedforward, 
@@ -43,22 +43,24 @@ class VAETransformer_FCGPFA(nn.Module):
         self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
         
         if self.decoder_architecture == 0:
-            self.decoder_fc = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
-            torch.nn.init.kaiming_uniform_(self.decoder_fc.weight, mode='fan_in', nonlinearity='relu')
+            self.sti_decoder = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+            torch.nn.init.kaiming_uniform_(self.sti_decoder.weight, mode='fan_in', nonlinearity='relu')
         else:
-            # Enhanced decoder_fc with additional layers and non-linearities
-            self.decoder_fc = nn.Sequential(
+            # Enhanced sti_decoder with additional layers and non-linearities
+            self.sti_decoder = nn.Sequential(
                 nn.Linear(nl_dim, nl_dim * self.decoder_architecture),  # Expand dimension
                 nn.ReLU(),                      # Non-linear activation
                 # Final output to match required dimensions
                 nn.Linear(nl_dim* self.decoder_architecture, self.nbasis * self.narea * self.nfactor)  
             )
-            torch.nn.init.kaiming_uniform_(self.decoder_fc[0].weight, mode='fan_in', nonlinearity='relu')
-            torch.nn.init.kaiming_uniform_(self.decoder_fc[2].weight, mode='fan_in', nonlinearity='relu')
+            torch.nn.init.kaiming_uniform_(self.sti_decoder[0].weight, mode='fan_in', nonlinearity='relu')
+            torch.nn.init.kaiming_uniform_(self.sti_decoder[2].weight, mode='fan_in', nonlinearity='relu')
             
         self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
-        self.readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
+        self.sti_readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
         self.positional_encoding = PositionalEncoding(self.d_model)
+        
+        self.sti_inhomo = nn.Parameter(torch.zeros(self.narea, self.nfactor, self.nbasis))
         
         ### FCGPFA's parameters
         # NOT needed to do gradient descent on these parameters
@@ -125,9 +127,7 @@ class VAETransformer_FCGPFA(nn.Module):
                             self.coupling_outputs[iarea][jarea] *
                             self.cp_time_varying_coef_offset[iarea, jarea, 0, 0]
                         )
-                    
-                        
-
+        
         self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
             self.spikes_full[:,:,self.npadding:], weight, self.K, 
             initial_mu=None, initial_hessian=None, bias=bias, 
@@ -179,8 +179,8 @@ class VAETransformer_FCGPFA(nn.Module):
                     
     def get_ci(self, alpha=0.05):
         self.std = torch.sqrt(torch.diagonal(-torch.linalg.inv(self.hessian), dim1=-2, dim2=-1))
-        z = scipy.stats.norm.ppf(1-alpha/2)
-        self.ci = [self.mu - z * self.std, self.mu + z * self.std]
+        zscore = scipy.stats.norm.ppf(1-alpha/2)
+        self.ci = [self.mu - zscore * self.std, self.mu + zscore * self.std]
         self.ci_time_varying_coef = [
             torch.einsum('ijl,mlt -> ijmt', self.cp_latents_readout, self.ci[0]) \
                 + self.cp_time_varying_coef_offset, 
@@ -188,37 +188,41 @@ class VAETransformer_FCGPFA(nn.Module):
                 + self.cp_time_varying_coef_offset
             ]
 
-    def forward(self, src, spikes_full, fix_latents=False):
+    def forward(self, src, spikes_full, 
+                fix_latents=False, fix_stimulus=False,
+                only_coupling=False, only_stimulus=False):
+        assert not (only_coupling and only_stimulus), 'Cannot have both only_coupling and only_stimulus'
         self.spikes_full = spikes_full
         self.ntrial = spikes_full.shape[0]
+        self.sti_z, self.sti_mu, self.sti_logvar = (None, 
+                                            torch.zeros(self.ntrial, self.nl_dim), 
+                                            torch.zeros(self.ntrial, self.nl_dim))
         
         ### VAETransformer's forward pass
-        mu, logvar = self.encode(src)
-        z = self.sample_a_latent(mu, logvar)
-        self.firing_rates_stimulus = self.decode(z)
+        if not only_coupling:
+            if fix_stimulus:
+                self.get_inhomo_firing_rates_stimulus()
+            else:
+                self.sti_mu, self.sti_logvar = self.encode(src)
+                self.sti_z = self.sample_a_latent(self.sti_mu, self.sti_logvar)
+                self.firing_rates_stimulus = self.decode(self.sti_z)
         
-        '''
         ### FCGPFA's forward pass 
-        ### (when fix_latents is True, latents is fixed)
         # Get latents
-        self.get_coupling_outputs()
-        self.get_latents(fix_latents=fix_latents)
-        self.get_firing_rates_coupling()
-        self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
-        return self.firing_rates_combined, z, mu, logvar
-        '''
-
-        ### FCGPFA's forward pass 
-        ### (when fix_latents is True, stimulus effect is zero and only update coupling effects)
-        # Get latents
-        self.get_coupling_outputs()
-        self.get_latents(fix_latents=False)
-        self.get_firing_rates_coupling()
-        if fix_latents:
+        if not only_stimulus:
+            self.get_coupling_outputs()
+            self.get_latents(fix_latents=fix_latents)
+            self.get_firing_rates_coupling()
+        
+        ### Return the combined firing rates
+        if only_coupling:
             self.firing_rates_combined = -5 + self.firing_rates_coupling
-        else:
-            self.firing_rates_combined = self.firing_rates_stimulus + self.firing_rates_coupling
-        return self.firing_rates_combined, z, mu, logvar
+            return self.firing_rates_combined
+        if only_stimulus:
+            self.firing_rates_combined = -5 + self.firing_rates_stimulus
+            return self.firing_rates_combined
+        self.firing_rates_combined = -5 + self.firing_rates_stimulus + self.firing_rates_coupling
+        return self.firing_rates_combined
     
     def encode(self, src):
         # src: mnt
@@ -226,8 +230,8 @@ class VAETransformer_FCGPFA(nn.Module):
         # src: ntokens x batch_size x d_model (tmn)
         
         # Append CLS token to the beginning of each sequence
-        cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
-        src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
+        # cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
+        # src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
         
         src = self.positional_encoding(src)  # Apply positional encoding
         encoded = self.transformer_encoder(src) # Put it through the transformer encoder
@@ -238,9 +242,9 @@ class VAETransformer_FCGPFA(nn.Module):
         latent_params = self.to_latent(cls_encoded)
         return latent_params[:, :latent_params.size(-1)//2], latent_params[:, latent_params.size(-1)//2:]  # mu, log_var
 
-    def sample_a_latent(self, mu, logvar):
+    def sample_a_latent(self, mu, sti_logvar):
         if self.sample_latent:
-            std = torch.exp(0.5 * logvar)
+            std = torch.exp(0.5 * sti_logvar)
             eps = torch.randn_like(1*std)
             return mu + eps * std
             # return mu
@@ -251,7 +255,7 @@ class VAETransformer_FCGPFA(nn.Module):
         # proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
         # return proj-3
         
-        proj = self.decoder_fc(z)  # batch_size x (nbasis * narea * nfactor)
+        proj = self.sti_decoder(z)  # batch_size x (nbasis * narea * nfactor)
         proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
         
         # Apply spline_basis per area
@@ -259,7 +263,7 @@ class VAETransformer_FCGPFA(nn.Module):
         
         # Prepare to collect firing rates from each area
         firing_rates_list = []
-        for i_area, readout_matrix in enumerate(self.readout_matrices):
+        for i_area, readout_matrix in enumerate(self.sti_readout_matrices):
             # Extract factors for the current area
             area_factors = self.factors[:, i_area, :, :]  # batch_size x nt x nfactor (mtf)
             firing_rates = readout_matrix(area_factors)  # batch_size x nt x nneuron_area[i_area] (mtn)
@@ -267,14 +271,29 @@ class VAETransformer_FCGPFA(nn.Module):
 
         # Concatenate along a new dimension and then flatten to combine areas and neurons
         firing_rates_stimulus = torch.cat(firing_rates_list, dim=2)  # batch_size x nt x nneuron_tot (mtn)        
-        return firing_rates_stimulus.permute(0,2,1) -5 # mnt
+        return firing_rates_stimulus.permute(0,2,1) # mnt
+    
+    def get_inhomo_firing_rates_stimulus(self):
+        # self.sti_inhomo: narea x nfactor x nbasis **afb**
+        # narea x nt x nfactor **atf**
+        self.factors = torch.einsum('afb,tb->atf', self.sti_inhomo, self.spline_basis)
+        firing_rates_list = []
+        for i_area, readout_matrix in enumerate(self.sti_readout_matrices):
+            # nt x nfactor (tf)
+            area_factors = self.factors[i_area, :, :]
+            # nt x nneuron_area[i_area] (tn)
+            firing_rates = readout_matrix(area_factors)  
+            firing_rates_list.append(firing_rates)
+        self.firing_rates_stimulus = torch.cat(firing_rates_list, dim=1)  # nt x nneuron_tot (tn)
+        self.firing_rates_stimulus = self.firing_rates_stimulus[None,:,:].repeat(self.ntrial, 1, 1)
+        self.firing_rates_stimulus = self.firing_rates_stimulus.permute(0,2,1) # mnt
 
-    def loss_function(self, recon_x, x, mu, logvar, beta=0.2):
+    def loss_function(self, recon_x, x, mu, sti_logvar, beta=0.2):
         # Poisson loss
         poisson_loss = (torch.exp(recon_x) - x * recon_x).mean()
         
         # KL divergence
-        kl_div = torch.mean(-0.5 * (1 + logvar - mu.pow(2) - logvar.exp()))
+        kl_div = torch.mean(-0.5 * (1 + sti_logvar - mu.pow(2) - sti_logvar.exp()))
         kl_div *= self.nl_dim/(self.nneuron_tot*self.nt)
         return poisson_loss + beta * kl_div
         # return poisson_loss

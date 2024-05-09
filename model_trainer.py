@@ -61,7 +61,7 @@ class Trainer:
                                                         batch_size=self.params['batch_size'], 
                                                         shuffle=False)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, 
-                                                       batch_size=split, 
+                                                       batch_size=len(self.test_idx), 
                                                        shuffle=False)
         if verbose:
             print(f"Data processed. Train set size: {len(train_dataset)}, Test set size: {len(test_dataset)}")
@@ -96,33 +96,43 @@ class Trainer:
             use_self_coupling=self.params['use_self_coupling'],
             ).to(self.device)
         ################################
-        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['learning_rate'])
+        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
+        
+        transformer_group = ['transformer_encoder', 'to_latent']
+        sti_group = ['sti_readout_matrices', 'sti_decoder', 'sti_inhomo']
+        cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
+                    'cp_weight_sending', 'cp_weight_receiving']
         
         # Define different learning rates
-        standard_lr = self.params['learning_rate']
-        decoder_lr = self.params['learning_rate_decoder']  # Higher learning rate for decoder_matrix
-        cp_lr = self.params['learning_rate_cp']  # Learning rate for coupling parameters
+        transformer_lr = self.params['lr_transformer']
+        sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
+        cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
         weight_decay = self.params['weight_decay']
 
         # Configure optimizer with two parameter groups
+        params_not_assigned = [n for n, p in self.model.named_parameters()
+            if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
+        if len(params_not_assigned)!=0:
+            print(params_not_assigned)
+            raise ValueError("Some parameters are not assigned to any group.")
         self.optimizer = optim.Adam([
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('cp' not in n and 'decoder_fc' not in n)], 
-             'lr': standard_lr},
-            {'params': self.model.decoder_fc.parameters(), 
-             'lr': decoder_lr},
+                        if any([key_word in n for key_word in transformer_group])], 
+             'lr': transformer_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('cp' in n and 'weight' not in n)], 
-             'lr': cp_lr},
+                        if any([key_word in n for key_word in sti_group])], 
+             'lr': sti_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if ('cp' in n and 'weight' in n)], 
+                        if any([key_word in n for key_word in cp_group])], 
              'lr': cp_lr},
         ], weight_decay=weight_decay)
         ################################
         if verbose:
             print(f"Model initialized. Training on {self.device}")
 
-    def train(self, verbose=True, record_results=False):
+    def train(self, verbose=True, record_results=False, 
+              fix_latents=False, fix_stmulus=False,
+              only_coupling=False, only_stimulus=False):
         if verbose:
             print(f"Start training model with parameters: {self.params}")
         utils.set_seed(0)
@@ -134,18 +144,19 @@ class Trainer:
         temp_best_model_path = self.path+'/temp_best_model.pth'
         
         # Function to adjust learning rate
-        def adjust_learning_rate(optimizer, epoch):
-            standard_lr = self.params['learning_rate'] * (epoch + 1) / self.params['epoch_warm_up']
-            decoder_lr = self.params['learning_rate_decoder'] * (epoch + 1) / self.params['epoch_warm_up']
-            optimizer.param_groups[0]['lr'] = standard_lr
-            optimizer.param_groups[1]['lr'] = decoder_lr
+        def adjust_lr(optimizer, epoch):
+            optimizer.param_groups[0]['lr'] = \
+                self.params['lr_transformer']*(epoch+1)/self.params['epoch_warm_up']
+            optimizer.param_groups[1]['lr'] = \
+                self.params['lr_sti']*(epoch+1)/self.params['epoch_warm_up']
+            optimizer.param_groups[1]['lr'] = \
+                self.params['lr_cp']*(epoch+1)/self.params['epoch_warm_up']
         
         ### Training and Testing Loops
         for epoch in range(self.params['epoch_max']):
             # Warm up
             if epoch < self.params['epoch_warm_up']:
-                adjust_learning_rate(self.optimizer, epoch)
-            fix_latents = (epoch<=self.params['epoch_fix_latent'])
+                adjust_lr(self.optimizer, epoch)
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
@@ -153,11 +164,15 @@ class Trainer:
                 spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
                 spikes_full_batch = spikes_full_batch.to(self.device)
                 self.optimizer.zero_grad()
-                firing_rate, z, mu, logvar = self.model(spikes_full_low_res_batch, 
+                firing_rate = self.model(spikes_full_low_res_batch, 
                                                         spikes_full_batch, 
-                                                        fix_latents=fix_latents)
+                                                        fix_latents=fix_latents, 
+                                                        fix_stimulus=fix_stmulus, 
+                                                        only_coupling=only_coupling,
+                                                        only_stimulus=only_stimulus)
                 loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
-                                                mu, logvar, beta=self.params['beta'])
+                                                self.model.sti_mu, self.model.sti_logvar, 
+                                                beta=self.params['beta'])
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item() * spikes_full_batch.size(0)
@@ -170,11 +185,15 @@ class Trainer:
                 for spikes_full_low_res_batch, spikes_full_batch in self.test_loader:
                     spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
                     spikes_full_batch = spikes_full_batch.to(self.device)
-                    firing_rate, z, mu, logvar = self.model(spikes_full_low_res_batch, 
+                    firing_rate = self.model(spikes_full_low_res_batch, 
                                                             spikes_full_batch,
-                                                            fix_latents=fix_latents)
+                                                            fix_latents=fix_latents,
+                                                            fix_stimulus=fix_stmulus,
+                                                            only_coupling=only_coupling,
+                                                            only_stimulus=only_stimulus)
                     loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
-                                                    mu, logvar, beta=0.0)
+                                                    self.model.sti_mu, self.model.sti_logvar, 
+                                                    beta=0.0)
                     test_loss += loss.item() * spikes_full_batch.size(0)
             test_loss /= len(self.test_loader.dataset)
             
@@ -205,11 +224,13 @@ class Trainer:
             self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
-    def predict(self, return_torch=True, dataset='all'):
+    def predict(self, return_torch=True, dataset='all',
+                fix_latents=False, fix_stmulus=False,
+                only_coupling=False, only_stimulus=False):
         self.model.eval()
         self.model.sample_latent = False
-        mu_list = []
-        std_list = []
+        sti_mu_list = []
+        sti_logvar_list = []
         firing_rate_list = []
         if dataset == 'all':
             all_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res, self.spikes_full)
@@ -225,20 +246,23 @@ class Trainer:
             for spikes_full_low_res_batch, spikes_full_batch in all_loader:
                 spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
                 spikes_full_batch = spikes_full_batch.to(self.device)
-                firing_rate, z, mu, logvar = self.model(spikes_full_low_res_batch, 
-                                                        spikes_full_batch, 
-                                                        fix_latents=False)
-                mu_list.append(mu)
-                std_list.append(torch.exp(0.5 * logvar))
+                firing_rate = self.model(spikes_full_low_res_batch, 
+                                                            spikes_full_batch, 
+                                                            fix_latents=fix_latents,
+                                                            fix_stimulus=fix_stmulus,
+                                                            only_coupling=only_coupling,
+                                                            only_stimulus=only_stimulus)
+                sti_mu_list.append(self.model.sti_mu)
+                sti_logvar_list.append(torch.exp(0.5 * self.model.sti_logvar))
                 firing_rate_list.append(firing_rate)
         if return_torch:
             return (torch.concat(firing_rate_list, dim=0).cpu(), 
-                    torch.concat(mu_list, dim=0).cpu(),
-                    torch.concat(std_list, dim=0).cpu())
+                    torch.concat(sti_mu_list, dim=0).cpu(),
+                    torch.concat(sti_logvar_list, dim=0).cpu())
         else:
             return (torch.concat(firing_rate_list, dim=0).cpu().numpy(), 
-                    torch.concat(mu_list, dim=0).cpu().numpy(),
-                    torch.concat(std_list, dim=0).cpu().numpy())
+                    torch.concat(sti_mu_list, dim=0).cpu().numpy(),
+                    torch.concat(sti_logvar_list, dim=0).cpu().numpy())
         
     def save_model_and_hp(self):
         filename = self.path + '/best_model_and_hp.pth'
