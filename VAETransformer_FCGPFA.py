@@ -11,7 +11,7 @@ class VAETransformer_FCGPFA(nn.Module):
     def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
                  nhead, decoder_architecture, 
                  npadding, nsubspace, K, nlatent, coupling_basis, use_self_coupling):
-        super(VAETransformer_FCGPFA, self).__init__()
+        super().__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
         self.d_model = sum(self.nneuron_list)
         self.nt, self.nbasis = spline_basis.shape
@@ -20,7 +20,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.nfactor = nfactor
         self.nl_dim = nl_dim
         self.nhead = nhead
-        self.sample_latent = False
+        self.sample_latent = False  # This will be changed in "Trainer"
         self.decoder_architecture = decoder_architecture
         
         ### FCGPFA's additional settings
@@ -71,7 +71,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_basis = coupling_basis
         
-        # DO gradient descent on these parameters
+        # Do gradient descent on these parameters
         self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.nlatent) * 2 - 1))
         self.cp_time_varying_coef_offset = nn.Parameter(1.0 * (torch.ones(self.narea, self.narea, 1, 1)))
         
@@ -101,9 +101,9 @@ class VAETransformer_FCGPFA(nn.Module):
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
         if fix_latents:
-            # self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
-            self.latents = torch.ones(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
-            self.latents[:,:,:150] = -1
+            self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            # self.latents = torch.ones(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            # self.latents[:,:,:150] = -1
             return None
         # Get the best latents under the current model
         with torch.no_grad():
