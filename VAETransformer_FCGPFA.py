@@ -8,15 +8,15 @@ import matplotlib.pyplot as plt
 import scipy.stats
 
 class VAETransformer_FCGPFA(nn.Module):
-    def __init__(self, num_layers, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
+    def __init__(self, num_layers, d_model, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
                  nhead, decoder_architecture, 
                  npadding, nsubspace, K, nlatent, coupling_basis, use_self_coupling):
         super().__init__()
         self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
-        self.d_model = sum(self.nneuron_list)
+        self.num_neurons = sum(self.nneuron_list)
+        self.d_model = d_model
         self.nt, self.nbasis = spline_basis.shape
         self.narea = len(self.nneuron_list)
-        self.nneuron_tot = self.d_model
         self.nfactor = nfactor
         self.nl_dim = nl_dim
         self.nhead = nhead
@@ -33,6 +33,7 @@ class VAETransformer_FCGPFA(nn.Module):
 
         ### VAETransformer's parameters
         # self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
+        self.token_converter = nn.Linear(self.num_neurons, self.d_model)
         transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, 
                                                             nhead=self.nhead,
                                                             dim_feedforward=dim_feedforward, 
@@ -109,8 +110,8 @@ class VAETransformer_FCGPFA(nn.Module):
         with torch.no_grad():
             # weight: mnlt
             # bias: mnt
-            weight = torch.zeros(self.ntrial, self.nneuron_tot, self.nlatent, self.nt, device=device)
-            bias = torch.zeros(self.ntrial, self.nneuron_tot, self.nt, device=device)
+            weight = torch.zeros(self.ntrial, self.num_neurons, self.nlatent, self.nt, device=device)
+            bias = torch.zeros(self.ntrial, self.num_neurons, self.nt, device=device)
             bias += self.firing_rates_stimulus
             for iarea in range(self.narea):
                 for jarea in range(self.narea):
@@ -164,7 +165,7 @@ class VAETransformer_FCGPFA(nn.Module):
                                     + self.cp_time_varying_coef_offset
         # coupling_outputs in subspace, weight_receving, time_varying_coef (total coupling effects) 
         # -> log_firing_rate
-        self.firing_rates_coupling = torch.zeros(self.ntrial, self.nneuron_tot, self.nt, 
+        self.firing_rates_coupling = torch.zeros(self.ntrial, self.num_neurons, self.nt, 
                                                  device=self.cp_latents_readout.device)
         for jarea in range(self.narea):
             for iarea in range(self.narea):
@@ -190,7 +191,7 @@ class VAETransformer_FCGPFA(nn.Module):
 
     def forward(self, src, spikes_full, 
                 fix_latents=False, fix_stimulus=False,
-                only_coupling=False, only_stimulus=False):
+                only_coupling=False, only_stimulus=False,):
         assert not (only_coupling and only_stimulus), 'Cannot have both only_coupling and only_stimulus'
         self.spikes_full = spikes_full
         self.ntrial = spikes_full.shape[0]
@@ -222,11 +223,13 @@ class VAETransformer_FCGPFA(nn.Module):
             self.firing_rates_combined = -5 + self.firing_rates_stimulus
             return self.firing_rates_combined
         self.firing_rates_combined = -5 + self.firing_rates_stimulus + self.firing_rates_coupling
+        self.overlapping_scale = (self.firing_rates_stimulus - self.firing_rates_coupling).abs().mean()
         return self.firing_rates_combined
     
     def encode(self, src):
         # src: mnt
         src = src.permute(2, 0, 1)
+        src = self.token_converter(src)
         # src: ntokens x batch_size x d_model (tmn)
         
         # Append CLS token to the beginning of each sequence
@@ -270,7 +273,7 @@ class VAETransformer_FCGPFA(nn.Module):
             firing_rates_list.append(firing_rates)
 
         # Concatenate along a new dimension and then flatten to combine areas and neurons
-        firing_rates_stimulus = torch.cat(firing_rates_list, dim=2)  # batch_size x nt x nneuron_tot (mtn)        
+        firing_rates_stimulus = torch.cat(firing_rates_list, dim=2)  # batch_size x nt x num_neurons (mtn)        
         return firing_rates_stimulus.permute(0,2,1) # mnt
     
     def get_inhomo_firing_rates_stimulus(self):
@@ -284,7 +287,7 @@ class VAETransformer_FCGPFA(nn.Module):
             # nt x nneuron_area[i_area] (tn)
             firing_rates = readout_matrix(area_factors)  
             firing_rates_list.append(firing_rates)
-        self.firing_rates_stimulus = torch.cat(firing_rates_list, dim=1)  # nt x nneuron_tot (tn)
+        self.firing_rates_stimulus = torch.cat(firing_rates_list, dim=1)  # nt x num_neurons (tn)
         self.firing_rates_stimulus = self.firing_rates_stimulus[None,:,:].repeat(self.ntrial, 1, 1)
         self.firing_rates_stimulus = self.firing_rates_stimulus.permute(0,2,1) # mnt
 
@@ -294,7 +297,7 @@ class VAETransformer_FCGPFA(nn.Module):
         
         # KL divergence
         kl_div = torch.mean(-0.5 * (1 + sti_logvar - mu.pow(2) - sti_logvar.exp()))
-        kl_div *= self.nl_dim/(self.nneuron_tot*self.nt)
+        kl_div *= self.nl_dim/(self.num_neurons*self.nt)
         return poisson_loss + beta * kl_div
         # return poisson_loss
 

@@ -229,6 +229,27 @@ class Allen_dataset:
             self.running_trial_index = self.mean_speed >= 1
             self.stationary_trial_index = self.mean_speed < 1
         self.all_trial_index = np.full(self.ntrial, True)
+
+    def get_pupil_diam(self):
+        pupil_table = self._session.get_pupil_data()
+        pupil_table["pupil_diam"] = np.sqrt(
+            pupil_table["pupil_height"]**2 + pupil_table["pupil_width"]**2
+        )
+        self.pupil_diam_xarray = pupil_table['pupil_diam'].to_xarray()
+        self.pupil_diam_xarray = self.pupil_diam_xarray.rename({'Time (s)': 'time'})
+
+        self.mean_pupil_diam = np.zeros(self.ntrial)
+        self.min_pupil_diam = np.zeros(self.ntrial)
+        self.max_pupil_diam = np.zeros(self.ntrial)
+        self.pupil_diam = np.zeros((self.nt, self.ntrial))
+        trial_window = np.arange(self.start_time,self.end_time, 1/self.fps)
+        
+        for i in range(self.ntrial):
+            time_selection = trial_window + self.presentation_times[i]
+            self.speed[:,i] = self.pupil_diam_xarray.sel(time = time_selection, method='nearest')
+            self.mean_speed[i] = self.speed[:,i].mean()
+            self.min_speed[i] = self.speed[:,i].min()
+            self.max_speed[i] = self.speed[:,i].max()
         
     def get_lfp(self, **kwargs):
         self.lfp = {}
@@ -405,45 +426,45 @@ class Tobias_LFP(LFP):
                                 np.nonzero(self.x > 1500)[0][0], self.nx])
         self.structure_acronyms = np.array(['Superficial', 'Medium', 'Deep'])
     
-class Simulation_LFP(LFP):
-    def __init__(self, **kwargs):
-        """To be done later. Need to include: gaussian bumps; the cases from jupyter notebooks"""
-        if sys.platform == 'linux':
-            sys.path.append("/home/qix/rCSD")
-        else:
-            sys.path.append("D:/Github/rCSD")
-        import ground_true_csd_bank
-        from forward_models import b_fwd_1d, fwd_model_1d
+# class Simulation_LFP(LFP):
+#     def __init__(self, **kwargs):
+#         """To be done later. Need to include: gaussian bumps; the cases from jupyter notebooks"""
+#         if sys.platform == 'linux':
+#             sys.path.append("/home/qix/rCSD")
+#         else:
+#             sys.path.append("D:/Github/rCSD")
+#         import ground_true_csd_bank
+#         from forward_models import b_fwd_1d, fwd_model_1d
         
-        self.source = "Simulation"
-        self.noise_amp = kwargs.pop('noise_amp', 0.03)
-        if 'gt_csd' in kwargs:
-            print("not finished! Can't allow user self design gt csd at the moment! ")
-            raise ValueError("Unfinished!")
-            # self.gt_csd = kwargs['gt_csd']
-            # self.generate_lfp(noise_amp)
-        else:
-            self.gt_csd_id = kwargs.pop('gt_csd_id', 0)
-            self.get_csd()
-            self.get_lfp()
+#         self.source = "Simulation"
+#         self.noise_amp = kwargs.pop('noise_amp', 0.03)
+#         if 'gt_csd' in kwargs:
+#             print("not finished! Can't allow user self design gt csd at the moment! ")
+#             raise ValueError("Unfinished!")
+#             # self.gt_csd = kwargs['gt_csd']
+#             # self.generate_lfp(noise_amp)
+#         else:
+#             self.gt_csd_id = kwargs.pop('gt_csd_id', 0)
+#             self.get_csd()
+#             self.get_lfp()
 
-    def get_csd(self):
+#     def get_csd(self):
 
-        self.R = 150
-        self.nx = 24
-        self.nz = 5*23
-        self.x = np. linspace(0, 2300, self.nx)[:, None]
-        self.z = np. linspace(0+10, 2300-10, self.nz)[:, None]
-        self.gt_csd, self.t, self.nt = ground_true_csd_bank.csd_simple_templete(self.gt_csd_id, self.z)
-        self.ntrial = self.gt_csd.shape[2]
+#         self.R = 150
+#         self.nx = 24
+#         self.nz = 5*23
+#         self.x = np. linspace(0, 2300, self.nx)[:, None]
+#         self.z = np. linspace(0+10, 2300-10, self.nz)[:, None]
+#         self.gt_csd, self.t, self.nt = ground_true_csd_bank.csd_simple_templete(self.gt_csd_id, self.z)
+#         self.ntrial = self.gt_csd.shape[2]
         
-    def get_lfp(self):
-        lfp_noiseless = fwd_model_1d(self.gt_csd, self.z, self.x, self.R)
-        noise = self.noise_amp * np.abs(lfp_noiseless).max()*np.random.randn(self.nx, self.nt, self.ntrial)
-        self.lfp = lfp_noiseless + noise
-        self.nx, self.nt, self.ntrial, self.lfp = utils.check_and_get_size(self.lfp)
-        self.get_mean_lfp()
-        self.intervals_lfp = np.array([0, np.nonzero(self.x > 1000)[0][0],
-                                np.nonzero(self.x > 1500)[0][0], self.nx])
-        self.structure_acronyms = np.array(['Superficial', 'Medium', 'Deep'])
+#     def get_lfp(self):
+#         lfp_noiseless = fwd_model_1d(self.gt_csd, self.z, self.x, self.R)
+#         noise = self.noise_amp * np.abs(lfp_noiseless).max()*np.random.randn(self.nx, self.nt, self.ntrial)
+#         self.lfp = lfp_noiseless + noise
+#         self.nx, self.nt, self.ntrial, self.lfp = utils.check_and_get_size(self.lfp)
+#         self.get_mean_lfp()
+#         self.intervals_lfp = np.array([0, np.nonzero(self.x > 1000)[0][0],
+#                                 np.nonzero(self.x > 1500)[0][0], self.nx])
+#         self.structure_acronyms = np.array(['Superficial', 'Medium', 'Deep'])
 

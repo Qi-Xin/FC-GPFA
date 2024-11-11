@@ -28,13 +28,13 @@ class Trainer:
         self.train_loader = None
         self.test_loader = None
         self.results_file = "training_results.json"
+        self.penalty_overlapping = params['penalty_overlapping']
         
         ### Get some dependent parameters
         self.narea = len(self.spikes)
         self.nneuron_list = [sp.shape[1] for sp in self.spikes]
         self.nt, self.ntrial = self.spikes[0].shape[2], self.spikes[0].shape[0]
         self.nt -= self.npadding
-        self.d_model = sum(self.nneuron_list)
 
     def process_data(self, verbose=False):
         ### Get tokenized spike trains by downsampling
@@ -49,7 +49,7 @@ class Trainer:
         ### Splitting data into train and test sets
         indices = list(range(self.ntrial))
         split = int(np.floor(0.8 * self.ntrial))
-        utils.set_seed(0)
+        utils.set_seed(1)
         np.random.shuffle(indices)
         self.train_idx, self.test_idx = indices[:split], indices[split:]
         train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.train_idx], 
@@ -80,6 +80,7 @@ class Trainer:
 
         self.model = VAETransformer_FCGPFA(
             num_layers=self.params['num_layers'], 
+            d_model=self.params['d_model'],
             dim_feedforward=self.params['dim_feedforward'], 
             nl_dim=self.params['nl_dim'], 
             spline_basis=spline_basis, 
@@ -98,7 +99,7 @@ class Trainer:
         ################################
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
         
-        transformer_group = ['transformer_encoder', 'to_latent']
+        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
         sti_group = ['sti_readout_matrices', 'sti_decoder', 'sti_inhomo']
         cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
                     'cp_weight_sending', 'cp_weight_receiving']
@@ -133,6 +134,7 @@ class Trainer:
     def train(self, verbose=True, record_results=False, 
               fix_latents=False, fix_stmulus=False,
               only_coupling=False, only_stimulus=False):
+        assert not (only_coupling and only_stimulus), 'Cannot have both only_coupling and only_stimulus'
         if verbose:
             print(f"Start training model with parameters: {self.params}")
         utils.set_seed(0)
@@ -173,6 +175,8 @@ class Trainer:
                 loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
                                                 self.model.sti_mu, self.model.sti_logvar, 
                                                 beta=self.params['beta'])
+                if self.penalty_overlapping is not None:
+                    loss += self.penalty_overlapping * self.model.overlapping_scale
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item() * spikes_full_batch.size(0)
@@ -193,7 +197,9 @@ class Trainer:
                                                             only_stimulus=only_stimulus)
                     loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
                                                     self.model.sti_mu, self.model.sti_logvar, 
-                                                    beta=0.0)
+                                                    beta=self.params['beta'])
+                    if self.penalty_overlapping is not None:
+                        loss += self.penalty_overlapping * self.model.overlapping_scale
                     test_loss += loss.item() * spikes_full_batch.size(0)
             test_loss /= len(self.test_loader.dataset)
             
