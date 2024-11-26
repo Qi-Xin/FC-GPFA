@@ -10,7 +10,7 @@ import copy
 import matplotlib.pyplot as plt
 import pickle
 import copy
-
+import logging
 import utility_functions as utils
 
 class LFP:
@@ -58,10 +58,178 @@ class LFP:
             plt.xlabel('Time (ms)')
             plt.show()
 
+
 class Allen_LFP(LFP):
     def __init__(self):
         self.x = None
         self.t = None
+
+
+class Allen_dataloader_multi_session():
+    def __init__(self, session_ids, **kwargs):
+        """
+        Args:
+            session_ids (list): List of session IDs to load
+            train_ratio (float): Ratio of data to use for training (default: 0.7)
+            val_ratio (float): Ratio of data to use for validation (default: 0.1)
+            batch_size (int): Number of trials per batch (default: 32)
+            shuffle (bool): Whether to shuffle the data (default: True)
+            **kwargs: Additional arguments passed to Allen_dataset
+        """
+        self.session_ids = session_ids if isinstance(session_ids, list) else [session_ids]
+        self.train_ratio = kwargs.pop('train_ratio', 0.7)
+        self.val_ratio = kwargs.pop('val_ratio', 0.1)
+        self.batch_size = kwargs.pop('batch_size', 32)
+        self.shuffle = kwargs.pop('shuffle', True)
+        self.trial_length = kwargs.pop('trial_length', 0.4)
+        self.padding = kwargs.pop('padding', 0.1)
+        self.fps = kwargs.pop('fps', 1e2)
+        logger = logging.getLogger(__name__)
+        logger.info(f"Session IDs: {self.session_ids}")
+        logger.info(f"Train ratio: {self.train_ratio}")
+        logger.info(f"Val ratio: {self.val_ratio}")
+        logger.info(f"Test ratio: {1-self.train_ratio-self.val_ratio}")
+        logger.info(f"Batch size: {self.batch_size}")
+        logger.info(f"Shuffle: {self.shuffle}")
+        logger.info(f"Trial length: {self.trial_length}")
+        logger.info(f"Padding: {self.padding}")
+        logger.info(f"FPS: {self.fps}")
+        
+        # Initialize base class with first session
+        kwargs['session_id'] = self.session_ids[0]
+        
+        # Store common parameters
+        self.common_kwargs = kwargs
+        
+        # Initialize session info
+        self._initialize_sessions()
+        
+        # Split data into train/val/test
+        self._split_data()
+        
+        # Initialize iterators
+        self.current_session = None
+        self.current_batch_idx = 0
+        self.current_split = 'train'
+
+    def _initialize_sessions(self):
+        """Initialize metadata for all sessions"""
+        self.total_trials = 0
+        self.session_trial_counts = []
+        self.session_trial_indices = []
+        
+        for session_id in self.session_ids:
+            # Get trial count for this session
+            kwargs = self.common_kwargs.copy()
+            kwargs['session_id'] = session_id
+            temp_session = Allen_dataset(**kwargs)
+            n_trials = len(temp_session.presentation_ids)
+            
+            self.session_trial_counts.append(n_trials)
+            self.session_trial_indices.append((self.total_trials, self.total_trials + n_trials))
+            self.total_trials += n_trials
+            
+            del temp_session  # Clean up
+
+    def _split_data(self):
+        """Split trials into train/val/test sets"""
+        all_indices = np.arange(self.total_trials)
+        if self.shuffle:
+            np.random.shuffle(all_indices)
+            
+        # Calculate split points
+        train_size = int(self.total_trials * self.train_ratio)
+        val_size = int(self.total_trials * self.val_ratio)
+        
+        self.train_indices = all_indices[:train_size]
+        self.val_indices = all_indices[train_size:train_size + val_size]
+        self.test_indices = all_indices[train_size + val_size:]
+        
+        # Create batch indices
+        self.train_batches = self._create_batches(self.train_indices)
+        self.val_batches = self._create_batches(self.val_indices)
+        self.test_batches = self._create_batches(self.test_indices)
+
+    def _create_batches(self, indices):
+        """Create batches from indices"""
+        n_samples = len(indices)
+        n_batches = n_samples // self.batch_size
+        batches = []
+        
+        for i in range(n_batches):
+            start_idx = i * self.batch_size
+            end_idx = start_idx + self.batch_size
+            batches.append(indices[start_idx:end_idx])
+            
+        # Handle remaining samples
+        if n_samples % self.batch_size != 0:
+            batches.append(indices[n_batches * self.batch_size:])
+            
+        return batches
+
+    def _get_session_for_trial(self, trial_idx):
+        """Get session ID for a given trial index"""
+        for i, (start, end) in enumerate(self.session_trial_indices):
+            if start <= trial_idx < end:
+                return self.session_ids[i], trial_idx - start
+        raise ValueError(f"Invalid trial index: {trial_idx}")
+
+    def _load_batch(self, batch_indices):
+        """Load a batch of trials"""
+        # Group trials by session
+        session_trials = {}
+        for trial_idx in batch_indices:
+            session_id, local_idx = self._get_session_for_trial(trial_idx)
+            if session_id not in session_trials:
+                session_trials[session_id] = []
+            session_trials[session_id].append(local_idx)
+
+        # Load data for each session
+        batch_data = []
+        for session_id, local_indices in session_trials.items():
+            # Load session if different from current
+            if self.current_session is None or session_id != self.current_session.session_id:
+                self.current_session = Allen_dataset(session_id=session_id, **self.common_kwargs)
+                self.current_session.get_lfp()
+
+            # Extract trials for this session
+            for local_idx in local_indices:
+                trial_data = {
+                    'lfp': self.current_session.lfp,  # You might want to select specific trial data here
+                    'session_id': session_id,
+                    'trial_idx': local_idx
+                }
+                batch_data.append(trial_data)
+
+        return batch_data
+
+    def get_batch(self, split='train'):
+        """Get next batch for specified split"""
+        if split == 'train':
+            batches = self.train_batches
+        elif split == 'val':
+            batches = self.val_batches
+        elif split == 'test':
+            batches = self.test_batches
+        else:
+            raise ValueError(f"Invalid split: {split}")
+
+        if self.current_batch_idx >= len(batches):
+            self.current_batch_idx = 0
+            if self.shuffle and split == 'train':
+                np.random.shuffle(self.train_batches)
+            return None
+
+        batch = self._load_batch(batches[self.current_batch_idx])
+        self.current_batch_idx += 1
+        return batch
+
+    def reset(self, split='train'):
+        """Reset batch iterator for specified split"""
+        self.current_batch_idx = 0
+        self.current_split = split
+        if self.shuffle and split == 'train':
+            np.random.shuffle(self.train_batches)
 
 class Allen_dataset:
     """ For drifting gratings, there are 30 unknown trials, 15*5*8=600 trials for 8 directions, 5 temporal frequencies, 
@@ -246,10 +414,10 @@ class Allen_dataset:
         
         for i in range(self.ntrial):
             time_selection = trial_window + self.presentation_times[i]
-            self.speed[:,i] = self.pupil_diam_xarray.sel(time = time_selection, method='nearest')
-            self.mean_speed[i] = self.speed[:,i].mean()
-            self.min_speed[i] = self.speed[:,i].min()
-            self.max_speed[i] = self.speed[:,i].max()
+            self.pupil_diam[:,i] = self.pupil_diam_xarray.sel(time = time_selection, method='nearest')
+            self.mean_pupil_diam[i] = self.pupil_diam[:,i].mean()
+            self.min_pupil_diam[i] = self.pupil_diam[:,i].min()
+            self.max_pupil_diam[i] = self.pupil_diam[:,i].max()
         
     def get_lfp(self, **kwargs):
         self.lfp = {}
