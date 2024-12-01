@@ -12,6 +12,7 @@ import pickle
 import copy
 import logging
 import utility_functions as utils
+from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 
 class LFP:
     def remove_padding_single(self, npadding):
@@ -81,6 +82,7 @@ class Allen_dataloader_multi_session():
         self.val_ratio = kwargs.pop('val_ratio', 0.1)
         self.batch_size = kwargs.pop('batch_size', 32)
         self.shuffle = kwargs.pop('shuffle', True)
+        self.align_stimulus = kwargs.pop('align_stimulus', True)
         self.trial_length = kwargs.pop('trial_length', 0.4)
         self.padding = kwargs.pop('padding', 0.1)
         self.fps = kwargs.pop('fps', 1e2)
@@ -95,12 +97,6 @@ class Allen_dataloader_multi_session():
         logger.info(f"Padding: {self.padding}")
         logger.info(f"FPS: {self.fps}")
         
-        # Initialize base class with first session
-        kwargs['session_id'] = self.session_ids[0]
-        
-        # Store common parameters
-        self.common_kwargs = kwargs
-        
         # Initialize session info
         self._initialize_sessions()
         
@@ -114,15 +110,28 @@ class Allen_dataloader_multi_session():
 
     def _initialize_sessions(self):
         """Initialize metadata for all sessions"""
+        self.session_metadata = {}
         self.total_trials = 0
         self.session_trial_counts = []
         self.session_trial_indices = []
+
+        if sys.platform == 'linux':
+            self.manifest_path = os.path.join('/home/qix/ecephys_cache_dir/', "manifest.json")
+        elif sys.platform == 'win32' or 'darwin':
+            self.manifest_path = os.path.join('D:/ecephys_cache_dir/', "manifest.json")
+        else:
+            raise ValueError("Undefined device!")
+        self._cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
         
         for session_id in self.session_ids:
             # Get trial count for this session
-            kwargs = self.common_kwargs.copy()
-            kwargs['session_id'] = session_id
-            temp_session = Allen_dataset(**kwargs)
+            self.session_metadata[session_id] = {}
+            self.session_metadata[session_id]['meta'] = self._cache.get_session_data(session_id)
+            self.session_metadata[session_id]['neurons'] = self.session_metadata[session_id]['meta'].probes
+            self.selected_units = self._session.units[
+                self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
+                self._session.units['probe_description'].isin(self.selected_probes)]
+
             n_trials = len(temp_session.presentation_ids)
             
             self.session_trial_counts.append(n_trials)
@@ -239,10 +248,9 @@ class Allen_dataset:
 
         self.source = "Allen"
         self.session_id = kwargs.pop('session_id', 791319847)
-        self.selected_probes = kwargs.pop('selected_probes', ['probeC'])
+        self.selected_probes = kwargs.pop('selected_probes', 'all')
         # self.probe_id = kwargs.pop('probe_id', 805008600)
-        self.stimulus_name = kwargs.pop('stimulus_name',
-                                        'drifting_gratings_contrast')
+        self.stimulus_name = kwargs.pop('stimulus_name', None)
         self.orientation = kwargs.pop('orientation', None)
         self.temporal_frequency = kwargs.pop('temporal_frequency', None)
         self.contrast = kwargs.pop('contrast', None)
@@ -251,6 +259,7 @@ class Allen_dataset:
         self.end_time = kwargs.pop('end_time', 0.4)
         self.padding = kwargs.pop('padding', 0.1)
         self.fps = kwargs.pop('fps', 1e3)
+        self.area = kwargs.pop('area', 'visual')
         
         assert type(self.selected_probes) in [str,list], "\"probe\" has to be either str or list!"
         if self.selected_probes=='all':
@@ -259,7 +268,6 @@ class Allen_dataset:
             self.selected_probes = [self.selected_probes]
         assert set(self.selected_probes).issubset(['probeA', 'probeB', 'probeC', 'probeD', 'probeE', 'probeF']) 
         
-        from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
         if sys.platform == 'linux':
             self.manifest_path = os.path.join('/home/qix/ecephys_cache_dir/', "manifest.json")
         elif sys.platform == 'win32' or 'darwin':
@@ -268,22 +276,37 @@ class Allen_dataset:
             raise ValueError("Undefined device!")
         self._cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
         self._session = self._cache.get_session_data(self.session_id)
-        if self.stimulus_name == "All":
-            self.presentation_table = self._session.stimulus_presentations
+        if self.stimulus_name is None:
+            # The trials are just random say 0.5 sec long sections in the session. 
+            self.presentation_table = None
+
         else:
-            if isinstance(self.stimulus_name ,str):
-                idx = self._session.stimulus_presentations.stimulus_name == self.stimulus_name
+            if self.stimulus_name == "all":
+                self.presentation_table = self._session.stimulus_presentations
             else:
-                idx = self._session.stimulus_presentations.stimulus_name .isin(self.stimulus_name) 
-            if self.orientation != None:
-                idx = idx & (self._session.stimulus_presentations.orientation.isin(self.orientation))
-            if self.temporal_frequency != None:
-                idx = idx & (self._session.stimulus_presentations.temporal_frequency.isin(self.temporal_frequency))
-            if self.contrast != None:
-                idx = idx & (self._session.stimulus_presentations.contrast.isin(self.contrast))
-            if self.stimulus_condition_id != None:
-                idx = idx & (self._session.stimulus_presentations['stimulus_condition_id'].isin(self.stimulus_condition_id))
-            self.presentation_table = self._session.stimulus_presentations [idx]
+                if isinstance(self.stimulus_name ,str):
+                    idx = self._session.stimulus_presentations.stimulus_name == self.stimulus_name
+                else:
+                    idx = self._session.stimulus_presentations.stimulus_name .isin(self.stimulus_name) 
+                if self.orientation != None:
+                    idx = idx & (self._session.stimulus_presentations.orientation.isin(self.orientation))
+                if self.temporal_frequency != None:
+                    idx = idx & (self._session.stimulus_presentations.temporal_frequency.isin(self.temporal_frequency))
+                if self.contrast != None:
+                    idx = idx & (self._session.stimulus_presentations.contrast.isin(self.contrast))
+                if self.stimulus_condition_id != None:
+                    idx = idx & (self._session.stimulus_presentations['stimulus_condition_id'].isin(self.stimulus_condition_id))
+                self.presentation_table = self._session.stimulus_presentations[idx]
+        
+        if self.area == 'visual':
+            self.selected_units = self._session.units[
+                self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
+                self._session.units['probe_description'].isin(self.selected_probes)]
+        else:
+            self.selected_units = self._session.units[
+                self._session.units['probe_description'].isin(self.selected_probes)]
+        self.unit_ids = self.selected_units.index.values
+
         self.presentation_times = self.presentation_table.start_time.values
         self.presentation_ids = self.presentation_table.index.values
         self.probes = self._session.probes
@@ -299,8 +322,8 @@ class Allen_dataset:
 
     def get_trial_metric_per_unit_per_trial(
         self, 
+        itrial=None, # None for all trials. This is not the index of the trial in the presentation_ids.
         metric_type='spike_trains', 
-        area='visual',
         dt=None, 
         empty_fill=np.nan, 
         verbose=False):
@@ -312,17 +335,10 @@ class Allen_dataset:
                     'spike_trains' (spike histogram, array of binary of interger counts),
                     'spike_times' (a sequence of spike times)
         """
-        if area == 'visual':
-            self.selected_units = self._session.units[
-                self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
-                self._session.units['probe_description'].isin(self.selected_probes)]
-        else:
-            self.selected_units = self._session.units[
-                self._session.units['probe_description'].isin(self.selected_probes)]
+
         trial_time_window = [self.start_time - self.padding, self.end_time]
         if dt is None:
             dt = 1/self.fps
-        self.unit_ids = self.selected_units.index.values
         spikes_table = self._session.trialwise_spike_times(
                 self.presentation_ids, self.unit_ids, trial_time_window)
         num_neurons = len(self.unit_ids)
