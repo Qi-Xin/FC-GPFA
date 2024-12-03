@@ -110,7 +110,7 @@ class Allen_dataloader_multi_session():
 
     def _initialize_sessions(self):
         """Initialize metadata for all sessions"""
-        self.session_metadata = {}
+        self.sessions = {}
         self.total_trials = 0
         self.session_trial_counts = []
         self.session_trial_indices = []
@@ -125,12 +125,14 @@ class Allen_dataloader_multi_session():
         
         for session_id in self.session_ids:
             # Get trial count for this session
-            self.session_metadata[session_id] = {}
-            self.session_metadata[session_id]['meta'] = self._cache.get_session_data(session_id)
-            self.session_metadata[session_id]['neurons'] = self.session_metadata[session_id]['meta'].probes
-            self.selected_units = self._session.units[
-                self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
-                self._session.units['probe_description'].isin(self.selected_probes)]
+            _session = self._cache.get_session_data(session_id)
+
+            self.sessions[session_id] = {}
+            self.sessions[session_id]['meta'] = _session
+            self.sessions[session_id]['probes'] = _session.probes
+            self.sessions[session_id]['units'] = _session.units[
+                _session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
+                _session.units['probe_description'].isin(self.selected_probes)]
 
             n_trials = len(temp_session.presentation_ids)
             
