@@ -82,20 +82,14 @@ class Allen_dataloader_multi_session():
         self.val_ratio = kwargs.pop('val_ratio', 0.1)
         self.batch_size = kwargs.pop('batch_size', 32)
         self.shuffle = kwargs.pop('shuffle', True)
-        self.align_stimulus = kwargs.pop('align_stimulus', True)
-        self.trial_length = kwargs.pop('trial_length', 0.4)
-        self.padding = kwargs.pop('padding', 0.1)
-        self.fps = kwargs.pop('fps', 1e2)
+        self.common_kwargs = kwargs
+
         logger = logging.getLogger(__name__)
-        logger.info(f"Session IDs: {self.session_ids}")
+        logger.info(f"Total number of sessions: {len(self.session_ids)}")
         logger.info(f"Train ratio: {self.train_ratio}")
         logger.info(f"Val ratio: {self.val_ratio}")
         logger.info(f"Test ratio: {1-self.train_ratio-self.val_ratio}")
         logger.info(f"Batch size: {self.batch_size}")
-        logger.info(f"Shuffle: {self.shuffle}")
-        logger.info(f"Trial length: {self.trial_length}")
-        logger.info(f"Padding: {self.padding}")
-        logger.info(f"FPS: {self.fps}")
         
         # Initialize session info
         self._initialize_sessions()
@@ -114,27 +108,12 @@ class Allen_dataloader_multi_session():
         self.total_trials = 0
         self.session_trial_counts = []
         self.session_trial_indices = []
-
-        if sys.platform == 'linux':
-            self.manifest_path = os.path.join('/home/qix/ecephys_cache_dir/', "manifest.json")
-        elif sys.platform == 'win32' or 'darwin':
-            self.manifest_path = os.path.join('D:/ecephys_cache_dir/', "manifest.json")
-        else:
-            raise ValueError("Undefined device!")
-        self._cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
         
         for session_id in self.session_ids:
             # Get trial count for this session
-            _session = self._cache.get_session_data(session_id)
+            self.sessions[session_id] = Allen_dataset(session_id=session_id, **self.common_kwargs)
 
-            self.sessions[session_id] = {}
-            self.sessions[session_id]['meta'] = _session
-            self.sessions[session_id]['probes'] = _session.probes
-            self.sessions[session_id]['units'] = _session.units[
-                _session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
-                _session.units['probe_description'].isin(self.selected_probes)]
-
-            n_trials = len(temp_session.presentation_ids)
+            n_trials = len(_session.presentation_ids)
             
             self.session_trial_counts.append(n_trials)
             self.session_trial_indices.append((self.total_trials, self.total_trials + n_trials))
@@ -242,17 +221,59 @@ class Allen_dataloader_multi_session():
         if self.shuffle and split == 'train':
             np.random.shuffle(self.train_batches)
 
+
+def combine_stimulus_presentations(stimulus_presentations, time_window=0.49):
+    """ Combine or split stimulus presentations so each trial is at least time_window length
+    Combined trials must have the same stimulus_name and are consecutive. """
+    # stimulus_presentations = stimulus_presentations.sort_values(by="start_time") # it's already sorted
+    combined_stimulus_presentations = []
+    for i, row in stimulus_presentations.iterrows():
+        if (
+            combined_stimulus_presentations
+            and combined_stimulus_presentations[-1]["stimulus_name"] != row["stimulus_name"]
+            and (combined_stimulus_presentations[-1]["stop_time"] - 
+                 combined_stimulus_presentations[-1]["start_time"]) < time_window
+        ):
+            # If the last combined stimulus presentation is not the same as the current one, and 
+            # the last combined stimulus presentation is less than time_window away from the current one,
+            # then we pop the last combined stimulus presentation.
+            combined_stimulus_presentations.pop()
+        if (
+            not combined_stimulus_presentations
+            or combined_stimulus_presentations[-1]["stimulus_name"] != row["stimulus_name"]
+            or (combined_stimulus_presentations[-1]["stop_time"] - 
+                 combined_stimulus_presentations[-1]["start_time"]) >= time_window
+        ):
+            # If the last combined stimulus presentation is not the same as the current one, or 
+            # there is no combined stimulus presentation yet, we append the current one.
+            combined_stimulus_presentations.append(row)
+        else:
+            # If the last combined stimulus presentation is the same as the current one,
+            # we combine them and update the stop time.
+            combined_stimulus_presentations[-1]["stop_time"] = row["stop_time"]            
+    return pd.DataFrame(combined_stimulus_presentations)
+
+
+def get_fake_stimulus_presentations(presentation_table, time_window=0.49):
+    """ Get random trials that are the same length of time_window. 
+     Inter trial interval is a uniform distribution. """
+    presentation_times = presentation_table.start_time.values
+    # presentation_ids = presentation_table.index.values
+    # n_trials = len(presentation_ids)
+    # trial_length = int(time_window * fps)
+    # inter_trial_interval = np.diff(np.sort(np.random.uniform(0, 1-time_window, n_trials-1)))
+
 class Allen_dataset:
     """ For drifting gratings, there are 30 unknown trials, 15*5*8=600 trials for 8 directions, 5 temporal frequencies, 
     15 iid trials each conditions. """
     # presentation_table is the center of trial info
-    def __init__(self, **kwargs):
+    def __init__(self, verbose=False, **kwargs):
 
         self.source = "Allen"
         self.session_id = kwargs.pop('session_id', 791319847)
         self.selected_probes = kwargs.pop('selected_probes', 'all')
-        # self.probe_id = kwargs.pop('probe_id', 805008600)
-        self.stimulus_name = kwargs.pop('stimulus_name', None)
+        self.align_stimulus = kwargs.pop('align_stimulus', True)
+        self.stimulus_name = kwargs.pop('stimulus_name', "all")
         self.orientation = kwargs.pop('orientation', None)
         self.temporal_frequency = kwargs.pop('temporal_frequency', None)
         self.contrast = kwargs.pop('contrast', None)
@@ -262,6 +283,16 @@ class Allen_dataset:
         self.padding = kwargs.pop('padding', 0.1)
         self.fps = kwargs.pop('fps', 1e3)
         self.area = kwargs.pop('area', 'visual')
+
+        self.padding = kwargs.get('padding', 0.1)
+        self.fps = kwargs.get('fps', 1e2)
+        if verbose:
+            logger = logging.getLogger(__name__)
+            logger.info(f"Align stimulus: {self.align_stimulus}")
+            logger.info(f"Trial length: {self.end_time - self.start_time}")
+            logger.info(f"Padding: {self.padding}")
+            logger.info(f"FPS: {self.fps}")
+            logger.info(f"Area: {self.area}")
         
         assert type(self.selected_probes) in [str,list], "\"probe\" has to be either str or list!"
         if self.selected_probes=='all':
@@ -276,13 +307,12 @@ class Allen_dataset:
             self.manifest_path = os.path.join('D:/ecephys_cache_dir/', "manifest.json")
         else:
             raise ValueError("Undefined device!")
+
         self._cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
         self._session = self._cache.get_session_data(self.session_id)
-        if self.stimulus_name is None:
-            # The trials are just random say 0.5 sec long sections in the session. 
-            self.presentation_table = None
 
-        else:
+        # Get stimulus presentation table (Select trials)
+        if self.align_stimulus:
             if self.stimulus_name == "all":
                 self.presentation_table = self._session.stimulus_presentations
             else:
@@ -299,7 +329,14 @@ class Allen_dataset:
                 if self.stimulus_condition_id != None:
                     idx = idx & (self._session.stimulus_presentations['stimulus_condition_id'].isin(self.stimulus_condition_id))
                 self.presentation_table = self._session.stimulus_presentations[idx]
+        else:
+            # The trials are just random say 0.5 sec long sections in the session. 
+            time_range = [self._session.stimulus_presentations.iloc[0]["start_time"], 
+                          self._session.stimulus_presentations.iloc[-1]["stop_time"]]
+            
+            self.presentation_table = None
         
+        # Get units
         if self.area == 'visual':
             self.selected_units = self._session.units[
                 self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
