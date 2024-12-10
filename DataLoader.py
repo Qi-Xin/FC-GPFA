@@ -112,8 +112,7 @@ class Allen_dataloader_multi_session():
         for session_id in self.session_ids:
             # Get trial count for this session
             self.sessions[session_id] = Allen_dataset(session_id=session_id, **self.common_kwargs)
-
-            n_trials = len(_session.presentation_ids)
+            n_trials = len(self.sessions[session_id].presentation_ids)
             
             self.session_trial_counts.append(n_trials)
             self.session_trial_indices.append((self.total_trials, self.total_trials + n_trials))
@@ -254,14 +253,37 @@ def combine_stimulus_presentations(stimulus_presentations, time_window=0.49):
     return pd.DataFrame(combined_stimulus_presentations)
 
 
-def get_fake_stimulus_presentations(presentation_table, time_window=0.49):
+def get_fake_stimulus_presentations(presentation_table, time_window=0.5, 
+                                    interval_minimum=0.05, interval_maximum=0.1):
     """ Get random trials that are the same length of time_window. 
      Inter trial interval is a uniform distribution. """
-    presentation_times = presentation_table.start_time.values
-    # presentation_ids = presentation_table.index.values
-    # n_trials = len(presentation_ids)
-    # trial_length = int(time_window * fps)
-    # inter_trial_interval = np.diff(np.sort(np.random.uniform(0, 1-time_window, n_trials-1)))
+
+    # Get the last stop time from presentation_table, or start at 0
+    experiment_start_time = presentation_table['start_time'].min()
+    experiment_stop_time = presentation_table['stop_time'].max()
+    
+    # Generate start times with random intervals until we reach experiment_stop_time
+    start_times = []
+    current_time = experiment_start_time
+    
+    while current_time + time_window <= experiment_stop_time:
+        # Add random interval between 0 and 0.1
+        interval = np.random.uniform(interval_minimum, interval_maximum)
+        current_time += interval
+        
+        # Only add if there's room for full trial
+        if current_time + time_window <= experiment_stop_time:
+            start_times.append(current_time)
+            current_time += time_window
+    
+    # Create DataFrame with stimulus_presentation_id as index
+    fake_stimulus_presentations = pd.DataFrame({
+        'start_time': start_times,
+        'stop_time': [start + time_window for start in start_times]
+    }, index=pd.RangeIndex(len(start_times), name='stimulus_presentation_id'))
+    
+    return fake_stimulus_presentations
+
 
 class Allen_dataset:
     """ For drifting gratings, there are 30 unknown trials, 15*5*8=600 trials for 8 directions, 5 temporal frequencies, 
@@ -272,7 +294,8 @@ class Allen_dataset:
         self.source = "Allen"
         self.session_id = kwargs.pop('session_id', 791319847)
         self.selected_probes = kwargs.pop('selected_probes', 'all')
-        self.align_stimulus = kwargs.pop('align_stimulus', True)
+        self.align_stimulus_onset = kwargs.pop('align_stimulus_onset', True)
+        self.merge_trials = kwargs.pop('merge_trials', False)
         self.stimulus_name = kwargs.pop('stimulus_name', "all")
         self.orientation = kwargs.pop('orientation', None)
         self.temporal_frequency = kwargs.pop('temporal_frequency', None)
@@ -312,14 +335,14 @@ class Allen_dataset:
         self._session = self._cache.get_session_data(self.session_id)
 
         # Get stimulus presentation table (Select trials)
-        if self.align_stimulus:
+        if self.align_stimulus_onset:
             if self.stimulus_name == "all":
                 self.presentation_table = self._session.stimulus_presentations
             else:
                 if isinstance(self.stimulus_name ,str):
                     idx = self._session.stimulus_presentations.stimulus_name == self.stimulus_name
                 else:
-                    idx = self._session.stimulus_presentations.stimulus_name .isin(self.stimulus_name) 
+                    idx = self._session.stimulus_presentations.stimulus_name.isin(self.stimulus_name) 
                 if self.orientation != None:
                     idx = idx & (self._session.stimulus_presentations.orientation.isin(self.orientation))
                 if self.temporal_frequency != None:
@@ -329,12 +352,14 @@ class Allen_dataset:
                 if self.stimulus_condition_id != None:
                     idx = idx & (self._session.stimulus_presentations['stimulus_condition_id'].isin(self.stimulus_condition_id))
                 self.presentation_table = self._session.stimulus_presentations[idx]
+            if self.merge_trials:
+                self.presentation_table = combine_stimulus_presentations(
+                    self.presentation_table, 
+                    time_window=self.end_time - self.start_time + self.padding
+                )
         else:
             # The trials are just random say 0.5 sec long sections in the session. 
-            time_range = [self._session.stimulus_presentations.iloc[0]["start_time"], 
-                          self._session.stimulus_presentations.iloc[-1]["stop_time"]]
-            
-            self.presentation_table = None
+            self.presentation_table = get_fake_stimulus_presentations(self._session.stimulus_presentations, time_window=)
         
         # Get units
         if self.area == 'visual':
