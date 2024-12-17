@@ -359,7 +359,7 @@ class Allen_dataset:
                 )
         else:
             # The trials are just random say 0.5 sec long sections in the session. 
-            self.presentation_table = get_fake_stimulus_presentations(self._session.stimulus_presentations, time_window=)
+            self.presentation_table = get_fake_stimulus_presentations(self._session.stimulus_presentations, time_window=0.5)
         
         # Get units
         if self.area == 'visual':
@@ -384,9 +384,15 @@ class Allen_dataset:
             self.npadding = int(self.padding*self.fps)
             self.time_line_padding = np.arange(self.start_time - self.padding, self.end_time, 1/self.fps)
 
+    def get_spike_table(self, trial_ids=None):
+        trial_time_window = [self.start_time - self.padding, self.end_time]
+        spikes_table = self._session.trialwise_spike_times(
+                self.presentation_ids, self.unit_ids, trial_time_window)
+        return spikes_table
+
     def get_trial_metric_per_unit_per_trial(
         self, 
-        itrial=None, # None for all trials. This is not the index of the trial in the presentation_ids.
+        trial_ids=None, # None for all trials. This is not the index of the trial in the presentation_ids.
         metric_type='spike_trains', 
         dt=None, 
         empty_fill=np.nan, 
