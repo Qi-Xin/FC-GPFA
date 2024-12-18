@@ -117,8 +117,6 @@ class Allen_dataloader_multi_session():
             self.session_trial_counts.append(n_trials)
             self.session_trial_indices.append((self.total_trials, self.total_trials + n_trials))
             self.total_trials += n_trials
-            
-            del temp_session  # Clean up
 
     def _split_data(self):
         """Split trials into train/val/test sets"""
@@ -384,15 +382,62 @@ class Allen_dataset:
             self.npadding = int(self.padding*self.fps)
             self.time_line_padding = np.arange(self.start_time - self.padding, self.end_time, 1/self.fps)
 
-    def get_spike_table(self, trial_ids=None):
+    def get_spike_table(self, selected_presentation_ids):
+        """ Get spike times for selected trials.
+
+        Args:
+            selected_trials (array-like, optional): Indices of trials to get spikes for. 
+                If None, gets spikes for all trials. Default: None.
+                It's 0-indexed and not the id of the trial in the presentation_ids.
+
+        Returns:
+            pd.DataFrame: DataFrame containing spike times with columns:
+                - stimulus_presentation_id (int): ID of the stimulus presentation
+                - unit_id (int): ID of the unit that spiked
+                - time_since_stimulus_presentation_onset (float): Time since stimulus onset in seconds
+                Index is spike_time (float): Absolute time of spike in seconds
+        """
         trial_time_window = [self.start_time - self.padding, self.end_time]
-        spikes_table = self._session.trialwise_spike_times(
-                self.presentation_ids, self.unit_ids, trial_time_window)
+        presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
+        presentation_end_times = np.array(self.presentation_table.loc[self.presentation_ids]['stop_time'])
+        
+        presentation_ids = []
+        unit_ids = []
+        spike_times = []
+
+        for unit_id in self.unit_ids:
+            unit_spike_times = self._session.spike_times[unit_id]
+
+            for s, stimulus_presentation_id in enumerate(selected_presentation_ids):
+                trial_start_time = presentation_start_times[s] + trial_time_window[0] 
+                trial_end_time = presentation_start_times[s] + trial_time_window[1]
+
+                trial_start_index = np.searchsorted(unit_spike_times, trial_start_time)
+                trial_end_index = np.searchsorted(unit_spike_times, trial_end_time)
+
+                trial_unit_spike_times = unit_spike_times[trial_start_index:trial_end_index]
+                if len(trial_unit_spike_times) == 0:
+                    continue
+
+                unit_ids.append(np.zeros([trial_unit_spike_times.size]) + unit_id)
+                presentation_ids.append(np.zeros([trial_unit_spike_times.size]) + stimulus_presentation_id)
+                spike_times.append(trial_unit_spike_times)
+
+        spike_df = pd.DataFrame({
+            'stimulus_presentation_id': np.concatenate(presentation_ids).astype(int),
+            'unit_id': np.concatenate(unit_ids).astype(int)
+        }, index=pd.Index(np.concatenate(spike_times), name='spike_time'))
+
+        onset_times = self.presentation_table.loc[self.presentation_ids]["start_time"]
+        spikes_table = spike_df.join(onset_times, on=["stimulus_presentation_id"])
+        spikes_table["time_since_stimulus_presentation_onset"] = spikes_table.index - spikes_table["start_time"]
+        spikes_table.sort_values('spike_time', axis=0, inplace=True)
+        spikes_table.drop(columns=["start_time"], inplace=True)
         return spikes_table
 
     def get_trial_metric_per_unit_per_trial(
         self, 
-        trial_ids=None, # None for all trials. This is not the index of the trial in the presentation_ids.
+        selected_trials=None, # None for all trials. This is not the index of the trial in the presentation_ids.
         metric_type='spike_trains', 
         dt=None, 
         empty_fill=np.nan, 
@@ -407,13 +452,18 @@ class Allen_dataset:
         """
 
         trial_time_window = [self.start_time - self.padding, self.end_time]
+        if selected_trials is not None:
+            selected_presentation_ids = self.presentation_ids[selected_trials]
+        else:
+            selected_presentation_ids = self.presentation_ids
         if dt is None:
             dt = 1/self.fps
-        spikes_table = self._session.trialwise_spike_times(
-                self.presentation_ids, self.unit_ids, trial_time_window)
+        # spikes_table = self._session.trialwise_spike_times(
+        #         self.presentation_ids, self.unit_ids, trial_time_window)
+        spikes_table = self.get_spike_table(selected_presentation_ids=selected_presentation_ids)
         num_neurons = len(self.unit_ids)
         num_trials = len(self.presentation_ids)
-        metric_table = pd.DataFrame(index=self.unit_ids, columns=self.presentation_ids)
+        metric_table = pd.DataFrame(index=self.unit_ids, columns=selected_presentation_ids)
         metric_table.index.name = 'units'
 
         if metric_type == 'spike_trains':
@@ -424,7 +474,7 @@ class Allen_dataset:
         for u, unit_id in enumerate(self.unit_ids):
             if verbose and (u % 40 == 0):
                 print('neuron:', u)
-            for s, stimulus_presentation_id in enumerate(self.presentation_ids):
+            for s, stimulus_presentation_id in enumerate(selected_presentation_ids):
                 spike_times = spikes_table[
                         (spikes_table['unit_id'] == unit_id) &
                         (spikes_table['stimulus_presentation_id'] ==
