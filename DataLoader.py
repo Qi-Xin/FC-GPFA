@@ -13,7 +13,7 @@ import copy
 import logging
 import utility_functions as utils
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
-
+from collections import defaultdict
 class LFP:
     def remove_padding_single(self, npadding):
         self.lfp = self.lfp[:,npadding:-npadding,:]
@@ -161,28 +161,25 @@ class Allen_dataloader_multi_session():
                 return self.session_ids[i], trial_idx - start
         raise ValueError(f"Invalid trial index: {trial_idx}")
 
-    def _load_batch(self, batch_indices):
+    def _load_batch(self, batch_indices, include_behavior=False):
         """Load a batch of trials"""
         # Group trials by session
-        session_trials = {}
+        session_trials = defaultdict(list)
         for trial_idx in batch_indices:
             session_id, local_idx = self._get_session_for_trial(trial_idx)
-            if session_id not in session_trials:
-                session_trials[session_id] = []
             session_trials[session_id].append(local_idx)
 
         # Load data for each session
         batch_data = []
         for session_id, local_indices in session_trials.items():
-            # Load session if different from current
-            if self.current_session is None or session_id != self.current_session.session_id:
-                self.current_session = Allen_dataset(session_id=session_id, **self.common_kwargs)
-                self.current_session.get_lfp()
+            current_session = self.sessions[session_id]
 
             # Extract trials for this session
             for local_idx in local_indices:
                 trial_data = {
-                    'lfp': self.current_session.lfp,  # You might want to select specific trial data here
+                    'spike_train': current_session.get_trial_metric_per_unit_per_trial(
+                        selected_trials=[local_idx]
+                    ),
                     'session_id': session_id,
                     'trial_idx': local_idx
                 }
@@ -503,6 +500,7 @@ class Allen_dataset:
             self.spike_train = metric_table
         if metric_type == 'spike_times':
             self.spike_times = metric_table
+        return metric_table
 
     def get_running(self, method="Pillow"):
         running_speed = self._session.running_speed
