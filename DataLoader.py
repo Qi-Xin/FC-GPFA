@@ -327,6 +327,7 @@ class Allen_dataset:
             raise ValueError("Undefined device!")
 
         self._cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
+        # V1._cache.get_session_table() to get the session_table
         self._session = self._cache.get_session_data(self.session_id)
 
         # Get stimulus presentation table (Select trials)
@@ -469,13 +470,14 @@ class Allen_dataset:
                     int((trial_time_window[1] - trial_time_window[0]) / dt) + 1)
 
         for u, unit_id in enumerate(self.unit_ids):
-            if verbose and (u % 40 == 0):
-                print('neuron:', u)
+            spikes_table_filtered_unit = spikes_table[spikes_table['unit_id'] == unit_id]
+            spike_times = spikes_table_filtered_unit
             for s, stimulus_presentation_id in enumerate(selected_presentation_ids):
-                spike_times = spikes_table[
-                        (spikes_table['unit_id'] == unit_id) &
-                        (spikes_table['stimulus_presentation_id'] ==
-                         stimulus_presentation_id)]
+                # If there is only one trial, then we don't need to filter by stimulus_presentation_id
+                if len(selected_presentation_ids) != 1:
+                    spike_times = spikes_table_filtered_unit[
+                            (spikes_table_filtered_unit['stimulus_presentation_id'] ==
+                             stimulus_presentation_id)]
                 spike_times = spike_times['time_since_stimulus_presentation_onset']
                 if metric_type == 'count':
                     metric_value = len(spike_times) if len(spike_times) != 0 else empty_fill
