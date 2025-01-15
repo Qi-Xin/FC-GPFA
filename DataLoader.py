@@ -14,6 +14,9 @@ import logging
 import utility_functions as utils
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 from collections import defaultdict
+from tqdm import tqdm
+
+
 class LFP:
     def remove_padding_single(self, npadding):
         self.lfp = self.lfp[:,npadding:-npadding,:]
@@ -85,11 +88,11 @@ class Allen_dataloader_multi_session():
         self.common_kwargs = kwargs
 
         logger = logging.getLogger(__name__)
-        logger.info(f"Total number of sessions: {len(self.session_ids)}")
-        logger.info(f"Train ratio: {self.train_ratio}")
-        logger.info(f"Val ratio: {self.val_ratio}")
-        logger.info(f"Test ratio: {1-self.train_ratio-self.val_ratio}")
-        logger.info(f"Batch size: {self.batch_size}")
+        logger.critical(f"Total number of sessions: {len(self.session_ids)}")
+        logger.critical(f"Train ratio: {self.train_ratio}")
+        logger.critical(f"Val ratio: {self.val_ratio}")
+        logger.critical(f"Test ratio: {1-self.train_ratio-self.val_ratio}")
+        logger.critical(f"Batch size: {self.batch_size}")
         
         # Initialize session info
         self._initialize_sessions()
@@ -109,7 +112,10 @@ class Allen_dataloader_multi_session():
         self.session_trial_counts = []
         self.session_trial_indices = []
         
-        for session_id in self.session_ids:
+        logger = logging.getLogger(__name__)
+        logger.critical("Start loading data")
+
+        for session_id in tqdm(self.session_ids):
             # Get trial count for this session
             self.sessions[session_id] = Allen_dataset(session_id=session_id, **self.common_kwargs)
             n_trials = len(self.sessions[session_id].presentation_ids)
