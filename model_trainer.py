@@ -8,7 +8,7 @@ from VAETransformer_FCGPFA import VAETransformer_FCGPFA, get_K
 import utility_functions as utils
 import GLM
 import matplotlib.pyplot as plt
-
+from DataLoader import Allen_dataloader_multi_session
 '''
 First, load data "spikes", set path, set hyperparameters, and use these three to create a Trainer object.
 Then, call the trainer.train() method to train the model, which use early stop. 
@@ -17,8 +17,8 @@ If the results is good, you can save the model along with hyperparameters (aka t
 '''
 
 class Trainer:
-    def __init__(self, spikes, path, params, npadding):
-        self.spikes = spikes
+    def __init__(self, data, path, params, npadding):
+        self.data = data
         self.path = path
         self.npadding = npadding
         self.params = params
@@ -37,34 +37,39 @@ class Trainer:
         self.nt -= self.npadding
 
     def process_data(self, verbose=False):
-        ### Get tokenized spike trains by downsampling
-        self.spikes_full = np.concatenate(self.spikes, axis=1)
-        self.spikes_full_low_res = utils.change_temporal_resolution_single(
-            self.spikes_full[:,:,self.npadding:], self.params['num_merge']
-            )
-        self.spikes_full = torch.tensor(self.spikes_full).float()
-        self.spikes_full_no_padding = self.spikes_full[:,:,self.npadding:]
-        self.spikes_full_low_res = torch.tensor(self.spikes_full_low_res).float()
-        
-        ### Splitting data into train and test sets
-        indices = list(range(self.ntrial))
-        split = int(np.floor(0.8 * self.ntrial))
-        utils.set_seed(1)
-        np.random.shuffle(indices)
-        self.train_idx, self.test_idx = indices[:split], indices[split:]
-        train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.train_idx], 
-                                                       self.spikes_full[self.train_idx])
-        test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.test_idx], 
-                                                      self.spikes_full[self.test_idx])
+        if type(self.data) == list:
+            ### Get tokenized spike trains by downsampling
+            self.spikes_full = np.concatenate(self.spikes, axis=1)
+            self.spikes_full_low_res = utils.change_temporal_resolution_single(
+                self.spikes_full[:,:,self.npadding:], self.params['num_merge']
+                )
+            self.spikes_full = torch.tensor(self.spikes_full).float()
+            self.spikes_full_no_padding = self.spikes_full[:,:,self.npadding:]
+            self.spikes_full_low_res = torch.tensor(self.spikes_full_low_res).float()
+            
+            ### Splitting data into train and test sets
+            indices = list(range(self.ntrial))
+            split = int(np.floor(0.8 * self.ntrial))
+            utils.set_seed(1)
+            np.random.shuffle(indices)
+            self.train_idx, self.test_idx = indices[:split], indices[split:]
+            train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.train_idx], 
+                                                        self.spikes_full[self.train_idx])
+            test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.test_idx], 
+                                                        self.spikes_full[self.test_idx])
 
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, 
-                                                        batch_size=self.params['batch_size'], 
+            self.train_loader = torch.utils.data.DataLoader(train_dataset, 
+                                                            batch_size=self.params['batch_size'], 
+                                                            shuffle=False)
+            self.test_loader = torch.utils.data.DataLoader(test_dataset, 
+                                                        batch_size=len(self.test_idx), 
                                                         shuffle=False)
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, 
-                                                       batch_size=len(self.test_idx), 
-                                                       shuffle=False)
-        if verbose:
-            print(f"Data processed. Train set size: {len(train_dataset)}, Test set size: {len(test_dataset)}")
+            if verbose:
+                print(f"Data processed. Train set size: {len(train_dataset)}, Test set size: {len(test_dataset)}")
+        elif type(self.data) == Allen_dataloader_multi_session:
+            self.train_loader = self.data.train_loader
+            self.test_loader = self.data.test_loader
+            
 
     def initialize_model(self, verbose=False):
         spline_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 

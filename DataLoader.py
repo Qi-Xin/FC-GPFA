@@ -167,7 +167,7 @@ class Allen_dataloader_multi_session():
                 return self.session_ids[i], trial_idx - start
         raise ValueError(f"Invalid trial index: {trial_idx}")
 
-    def _load_batch(self, batch_indices, include_behavior=False):
+    def _load_batch(self, batch_indices, include_details=True, ):
         """Load a batch of trials"""
         # Group trials by session
         session_trials = defaultdict(list)
@@ -175,23 +175,27 @@ class Allen_dataloader_multi_session():
             session_id, local_idx = self._get_session_for_trial(trial_idx)
             session_trials[session_id].append(local_idx)
 
-        # Load data for each session
-        batch_data = []
-        for session_id, local_indices in session_trials.items():
-            current_session = self.sessions[session_id]
+        # Load data for each trial in each session
+        if include_details:
+            batch_data = []
+            for session_id, local_indices in session_trials.items():
+                current_session = self.sessions[session_id]
 
-            # Extract trials for this session
-            for local_idx in local_indices:
-                trial_data = {
-                    'spike_train': current_session.get_trial_metric_per_unit_per_trial(
-                        selected_trials=[local_idx]
-                    ),
-                    'session_id': session_id,
-                    'trial_idx': local_idx
-                }
-                batch_data.append(trial_data)
+                # Extract trials for this session
+                for local_idx in local_indices:
+                    trial_data = {
+                        'spike_train': current_session.get_trial_metric_per_unit_per_trial(
+                            selected_trials=[local_idx]
+                        ),
+                        'session_id': session_id,
+                        'trial_idx': local_idx
+                    }
+                    batch_data.append(trial_data)
+            return batch_data
+        else:
+            # Just return the spike trains as numpy array
+            pass
 
-        return batch_data
 
     def get_batch(self, split='train'):
         """Get next batch for specified split"""
