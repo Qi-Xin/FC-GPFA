@@ -103,7 +103,6 @@ class Allen_dataloader_multi_session():
         # Initialize iterators
         self.current_session = None
         self.current_batch_idx = 0
-        self.current_split = 'train'
 
     def _initialize_sessions(self):
         """Initialize metadata for all sessions"""
@@ -148,11 +147,11 @@ class Allen_dataloader_multi_session():
         for i in range(n_batches):
             start_idx = i * self.batch_size
             end_idx = start_idx + self.batch_size
-            batches.append(indices[start_idx:end_idx])
+            batches.append(np.array(indices[start_idx:end_idx]))
             
         # Handle remaining samples
         if n_samples % self.batch_size != 0:
-            batches.append(indices[n_batches * self.batch_size:])
+            batches.append(np.array(indices[n_batches * self.batch_size:]))
             
         return batches
 
@@ -163,31 +162,21 @@ class Allen_dataloader_multi_session():
                 return self.session_ids[i], start
         raise ValueError(f"Invalid trial index: {trial_idx}")
 
-    def _load_batch(self, batch_indices, include_behavior=True):
+    def _load_batch(self, batch_indices, include_behavior=False):
         """Load a batch of trials"""
+        
         # Get session ID and local trial indices for each trial in the batch
         session_id, session_idx_start = self._get_session_for_trial(batch_indices[0])
-
-        # Load data for each trial in the session
+        local_idx = batch_indices - session_idx_start
+        current_session = self.sessions[session_id]
+        batch_data = current_session.get_trial_spike_trains(selected_trials=local_idx)
+        batch_data['session_id'] = session_id
+        
         if include_behavior:
-            batch_data = []
-            for session_id, local_indices in session_trials.items():
-                current_session = self.sessions[session_id]
-
-                # Extract trials for this session
-                for local_idx in local_indices:
-                    trial_data = {
-                        'spike_train': current_session.get_trial_metric_per_unit_per_trial(
-                            selected_trials=[local_idx]
-                        ),
-                        'session_id': session_id,
-                        'trial_idx': local_idx
-                    }
-                    batch_data.append(trial_data)
-            return batch_data
-        else:
-            # Just return the spike trains as numpy array
+            # Load behavior data
             pass
+        
+        return batch_data
 
     def get_batch(self, split='train'):
         """Get next batch for specified split"""
@@ -201,10 +190,7 @@ class Allen_dataloader_multi_session():
             raise ValueError(f"Invalid split: {split}")
 
         if self.current_batch_idx >= len(batches):
-            self.current_batch_idx = 0
-            if self.shuffle and split == 'train':
-                np.random.shuffle(self.train_batches)
-            return None
+            self.reset(split=split)
 
         batch = self._load_batch(batches[self.current_batch_idx])
         self.current_batch_idx += 1
@@ -213,7 +199,6 @@ class Allen_dataloader_multi_session():
     def reset(self, split='train'):
         """Reset batch iterator for specified split"""
         self.current_batch_idx = 0
-        self.current_split = split
         if self.shuffle and split == 'train':
             np.random.shuffle(self.train_batches)
 
