@@ -125,23 +125,19 @@ class Allen_dataloader_multi_session():
             self.total_trials += n_trials
 
     def _split_data(self):
-        """Split trials into train/val/test sets"""
-        all_indices = np.arange(self.total_trials)
+        """Split trials into train/val/test sets. 
+        Keep all trials in a batch to be from the same session"""
+        all_batches = []
+        for session_trial_indice in self.session_trial_indices:
+            all_batches += self._create_batches(np.arange(*session_trial_indice))
         if self.shuffle:
-            np.random.shuffle(all_indices)
-            
-        # Calculate split points
-        train_size = int(self.total_trials * self.train_ratio)
-        val_size = int(self.total_trials * self.val_ratio)
+            np.random.shuffle(all_batches)
         
-        self.train_indices = all_indices[:train_size]
-        self.val_indices = all_indices[train_size:train_size + val_size]
-        self.test_indices = all_indices[train_size + val_size:]
-        
-        # Create batch indices
-        self.train_batches = self._create_batches(self.train_indices)
-        self.val_batches = self._create_batches(self.val_indices)
-        self.test_batches = self._create_batches(self.test_indices)
+        train_size = int(len(all_batches) * self.train_ratio)
+        val_size = int(len(all_batches) * self.val_ratio)
+        self.train_batches = all_batches[:train_size]
+        self.val_batches = all_batches[train_size:train_size + val_size]
+        self.test_batches = all_batches[train_size + val_size:]
 
     def _create_batches(self, indices):
         """Create batches from indices"""
@@ -164,19 +160,16 @@ class Allen_dataloader_multi_session():
         """Get session ID for a given trial index"""
         for i, (start, end) in enumerate(self.session_trial_indices):
             if start <= trial_idx < end:
-                return self.session_ids[i], trial_idx - start
+                return self.session_ids[i], start
         raise ValueError(f"Invalid trial index: {trial_idx}")
 
-    def _load_batch(self, batch_indices, include_details=True, ):
+    def _load_batch(self, batch_indices, include_behavior=True):
         """Load a batch of trials"""
-        # Group trials by session
-        session_trials = defaultdict(list)
-        for trial_idx in batch_indices:
-            session_id, local_idx = self._get_session_for_trial(trial_idx)
-            session_trials[session_id].append(local_idx)
+        # Get session ID and local trial indices for each trial in the batch
+        session_id, session_idx_start = self._get_session_for_trial(batch_indices[0])
 
-        # Load data for each trial in each session
-        if include_details:
+        # Load data for each trial in the session
+        if include_behavior:
             batch_data = []
             for session_id, local_indices in session_trials.items():
                 current_session = self.sessions[session_id]
@@ -195,7 +188,6 @@ class Allen_dataloader_multi_session():
         else:
             # Just return the spike trains as numpy array
             pass
-
 
     def get_batch(self, split='train'):
         """Get next batch for specified split"""
@@ -389,7 +381,42 @@ class Allen_dataset:
         else:
             self.npadding = int(self.padding*self.fps)
             self.time_line_padding = np.arange(self.start_time - self.padding, self.end_time, 1/self.fps)
+    
+    def get_spike_table_optimized(self, selected_presentation_ids):
+        """Optimized spike table generation."""
+        if type(selected_presentation_ids) is not np.ndarray:
+            selected_presentation_ids = np.array(selected_presentation_ids)
+        trial_time_window = [self.start_time - self.padding, self.end_time]
+        presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
 
+        spikes = []
+        for unit_id in self.unit_ids:
+            unit_spike_times = self._session.spike_times[unit_id]
+
+            # Filter spikes once for all selected trials
+            trial_start_times = presentation_start_times[selected_presentation_ids] + trial_time_window[0]
+            trial_end_times = presentation_start_times[selected_presentation_ids] + trial_time_window[1]
+
+            spike_indices = np.searchsorted(unit_spike_times, [trial_start_times.min(), trial_end_times.max()])
+            filtered_spike_times = unit_spike_times[spike_indices[0]:spike_indices[1]]
+
+            # Match spikes to trials
+            trial_indices = np.searchsorted(trial_start_times, filtered_spike_times, side='right') - 1
+            valid_mask = (filtered_spike_times >= trial_start_times[trial_indices]) & \
+                         (filtered_spike_times <= trial_end_times[trial_indices])
+
+            spikes.append(pd.DataFrame({
+                'stimulus_presentation_id': selected_presentation_ids[trial_indices[valid_mask]],
+                'unit_id': unit_id,
+                'spike_time': filtered_spike_times[valid_mask],
+            }))
+
+        spike_df = pd.concat(spikes, ignore_index=True)
+        spike_df['time_since_stimulus_presentation_onset'] = \
+            spike_df['spike_time'] - self.presentation_table.loc[spike_df['stimulus_presentation_id'], 'start_time'].values
+        spike_df.sort_values('spike_time', inplace=True)
+        return spike_df
+    
     def get_spike_table(self, selected_presentation_ids):
         """ Get spike times for selected trials.
 
@@ -407,8 +434,7 @@ class Allen_dataset:
         """
         trial_time_window = [self.start_time - self.padding, self.end_time]
         presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
-        presentation_end_times = np.array(self.presentation_table.loc[self.presentation_ids]['stop_time'])
-        
+
         presentation_ids = []
         unit_ids = []
         spike_times = []
@@ -513,6 +539,66 @@ class Allen_dataset:
         if metric_type == 'spike_times':
             self.spike_times = metric_table
         return metric_table
+    
+    def get_trial_metric_per_unit_per_trial_test(
+        self, 
+        selected_trials=None, 
+        metric_type='spike_trains', 
+        dt=None, 
+        empty_fill=np.nan, 
+        verbose=False):
+        """Optimized method to get spike trains of selected units."""
+        
+        trial_time_window = [self.start_time - self.padding, self.end_time]
+        if selected_trials is not None:
+            selected_presentation_ids = self.presentation_ids[selected_trials]
+        else:
+            selected_presentation_ids = self.presentation_ids
+        
+        dt = dt or 1 / self.fps
+        spikes_table = self.get_spike_table(selected_presentation_ids=selected_presentation_ids)
+        num_neurons = len(self.unit_ids)
+
+        if metric_type == 'spike_trains':
+            time_bins = np.linspace(
+                trial_time_window[0], trial_time_window[1],
+                int((trial_time_window[1] - trial_time_window[0]) / dt) + 1
+            )
+
+        # Pre-group spikes by unit and stimulus presentation for faster access
+        spikes_grouped = spikes_table.groupby(['unit_id', 'stimulus_presentation_id'])
+
+        # Initialize an empty dictionary to store results
+        metric_data = {unit: {} for unit in self.unit_ids}
+
+        for (unit_id, stimulus_id), group in spikes_grouped:
+            spike_times = group['time_since_stimulus_presentation_onset']
+            
+            if metric_type == 'count':
+                metric_data[unit_id][stimulus_id] = len(spike_times) if not spike_times.empty else empty_fill
+            elif metric_type == 'shift':
+                metric_data[unit_id][stimulus_id] = np.mean(spike_times) if not spike_times.empty else empty_fill
+            elif metric_type == 'spike_trains':
+                metric_data[unit_id][stimulus_id] = np.histogram(spike_times, time_bins)[0]
+            elif metric_type == 'spike_times':
+                metric_data[unit_id][stimulus_id] = np.array(spike_times)
+            else:
+                raise TypeError('Wrong type of metric')
+
+        # Convert the dictionary to a DataFrame
+        metric_table = pd.DataFrame(metric_data).T
+        metric_table.index.name = 'units'
+
+        # Post-process DataFrame for specific metric types
+        if metric_type not in ['spike_trains', 'spike_times']:
+            metric_table = metric_table.apply(pd.to_numeric, errors='coerce')
+        elif metric_type == 'spike_trains':
+            self.spike_train = metric_table
+        elif metric_type == 'spike_times':
+            self.spike_times = metric_table
+
+        return metric_table
+
 
     def get_running(self, method="Pillow"):
         running_speed = self._session.running_speed

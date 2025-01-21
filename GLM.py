@@ -1,5 +1,5 @@
 #%% import
-from curses import raw
+# from curses import raw
 import os
 import collections
 from collections import defaultdict
