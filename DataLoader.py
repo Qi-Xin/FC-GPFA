@@ -382,7 +382,7 @@ class Allen_dataset:
             self.npadding = int(self.padding*self.fps)
             self.time_line_padding = np.arange(self.start_time - self.padding, self.end_time, 1/self.fps)
     
-    def get_spike_table_optimized(self, selected_presentation_ids):
+    def get_spike_table(self, selected_presentation_ids):
         """Optimized spike table generation."""
         if type(selected_presentation_ids) is not np.ndarray:
             selected_presentation_ids = np.array(selected_presentation_ids)
@@ -417,57 +417,57 @@ class Allen_dataset:
         spike_df.sort_values('spike_time', inplace=True)
         return spike_df
     
-    def get_spike_table(self, selected_presentation_ids):
-        """ Get spike times for selected trials.
+    # def get_spike_table(self, selected_presentation_ids):
+    #     """ Get spike times for selected trials.
 
-        Args:
-            selected_trials (array-like, optional): Indices of trials to get spikes for. 
-                If None, gets spikes for all trials. Default: None.
-                It's 0-indexed and not the id of the trial in the presentation_ids.
+    #     Args:
+    #         selected_trials (array-like, optional): Indices of trials to get spikes for. 
+    #             If None, gets spikes for all trials. Default: None.
+    #             It's 0-indexed and not the id of the trial in the presentation_ids.
 
-        Returns:
-            pd.DataFrame: DataFrame containing spike times with columns:
-                - stimulus_presentation_id (int): ID of the stimulus presentation
-                - unit_id (int): ID of the unit that spiked
-                - time_since_stimulus_presentation_onset (float): Time since stimulus onset in seconds
-                Index is spike_time (float): Absolute time of spike in seconds
-        """
-        trial_time_window = [self.start_time - self.padding, self.end_time]
-        presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
+    #     Returns:
+    #         pd.DataFrame: DataFrame containing spike times with columns:
+    #             - stimulus_presentation_id (int): ID of the stimulus presentation
+    #             - unit_id (int): ID of the unit that spiked
+    #             - time_since_stimulus_presentation_onset (float): Time since stimulus onset in seconds
+    #             Index is spike_time (float): Absolute time of spike in seconds
+    #     """
+    #     trial_time_window = [self.start_time - self.padding, self.end_time]
+    #     presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
 
-        presentation_ids = []
-        unit_ids = []
-        spike_times = []
+    #     presentation_ids = []
+    #     unit_ids = []
+    #     spike_times = []
 
-        for unit_id in self.unit_ids:
-            unit_spike_times = self._session.spike_times[unit_id]
+    #     for unit_id in self.unit_ids:
+    #         unit_spike_times = self._session.spike_times[unit_id]
 
-            for s, stimulus_presentation_id in enumerate(selected_presentation_ids):
-                trial_start_time = presentation_start_times[s] + trial_time_window[0] 
-                trial_end_time = presentation_start_times[s] + trial_time_window[1]
+    #         for s, stimulus_presentation_id in enumerate(selected_presentation_ids):
+    #             trial_start_time = presentation_start_times[s] + trial_time_window[0] 
+    #             trial_end_time = presentation_start_times[s] + trial_time_window[1]
 
-                trial_start_index = np.searchsorted(unit_spike_times, trial_start_time)
-                trial_end_index = np.searchsorted(unit_spike_times, trial_end_time)
+    #             trial_start_index = np.searchsorted(unit_spike_times, trial_start_time)
+    #             trial_end_index = np.searchsorted(unit_spike_times, trial_end_time)
 
-                trial_unit_spike_times = unit_spike_times[trial_start_index:trial_end_index]
-                if len(trial_unit_spike_times) == 0:
-                    continue
+    #             trial_unit_spike_times = unit_spike_times[trial_start_index:trial_end_index]
+    #             if len(trial_unit_spike_times) == 0:
+    #                 continue
 
-                unit_ids.append(np.zeros([trial_unit_spike_times.size]) + unit_id)
-                presentation_ids.append(np.zeros([trial_unit_spike_times.size]) + stimulus_presentation_id)
-                spike_times.append(trial_unit_spike_times)
+    #             unit_ids.append(np.zeros([trial_unit_spike_times.size]) + unit_id)
+    #             presentation_ids.append(np.zeros([trial_unit_spike_times.size]) + stimulus_presentation_id)
+    #             spike_times.append(trial_unit_spike_times)
 
-        spike_df = pd.DataFrame({
-            'stimulus_presentation_id': np.concatenate(presentation_ids).astype(int),
-            'unit_id': np.concatenate(unit_ids).astype(int)
-        }, index=pd.Index(np.concatenate(spike_times), name='spike_time'))
+    #     spike_df = pd.DataFrame({
+    #         'stimulus_presentation_id': np.concatenate(presentation_ids).astype(int),
+    #         'unit_id': np.concatenate(unit_ids).astype(int)
+    #     }, index=pd.Index(np.concatenate(spike_times), name='spike_time'))
 
-        onset_times = self.presentation_table.loc[self.presentation_ids]["start_time"]
-        spikes_table = spike_df.join(onset_times, on=["stimulus_presentation_id"])
-        spikes_table["time_since_stimulus_presentation_onset"] = spikes_table.index - spikes_table["start_time"]
-        spikes_table.sort_values('spike_time', axis=0, inplace=True)
-        spikes_table.drop(columns=["start_time"], inplace=True)
-        return spikes_table
+    #     onset_times = self.presentation_table.loc[self.presentation_ids]["start_time"]
+    #     spikes_table = spike_df.join(onset_times, on=["stimulus_presentation_id"])
+    #     spikes_table["time_since_stimulus_presentation_onset"] = spikes_table.index - spikes_table["start_time"]
+    #     spikes_table.sort_values('spike_time', axis=0, inplace=True)
+    #     spikes_table.drop(columns=["start_time"], inplace=True)
+    #     return spikes_table
 
     def get_trial_metric_per_unit_per_trial(
         self, 
