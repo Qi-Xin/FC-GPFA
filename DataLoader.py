@@ -16,6 +16,31 @@ from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProj
 from collections import defaultdict
 from tqdm import tqdm
 
+
+class BatchIterator:
+    """Custom iterator for Allen_dataloader_multi_session."""
+    def __init__(self, dataloader, split):
+        self.dataloader = dataloader
+        self.split = split
+        self.current_batch_idx = 0  # Local batch index
+
+    def __iter__(self):
+        self.dataloader.reset(split=self.split)  # Reset on new iteration
+        self.current_batch_idx = 0
+        return self
+
+    def __next__(self):
+        if self.current_batch_idx >= len(getattr(self.dataloader, f"{self.split}_batches")):
+            raise StopIteration
+        batch = self.dataloader.get_batch(split=self.split)
+        self.current_batch_idx += 1
+        return batch
+    
+    def __len__(self):
+        """Return the number of batches in the specified split."""
+        return len(getattr(self.dataloader, f"{self.split}_batches"))
+
+
 class Simple_dataloader_from_spikes():
     def __init__(self, 
                  spikes, 
@@ -71,10 +96,12 @@ class Simple_dataloader_from_spikes():
                                                         batch_size=self.batch_size, 
                                                         shuffle=False)
         if verbose:
-            print(f"Total trials: {self.ntrial},Batch size: {self.batch_size},
-                  Train set size: {len(train_dataset)}, 
-                  Val set size: {len(val_dataset)},
-                  Test set size: {len(test_dataset)}")
+            print(f"Total trials: {self.ntrial}, "
+                f"Batch size: {self.batch_size}, "
+                f"Train set size: {len(train_dataset)}, "
+                f"Val set size: {len(val_dataset)}, "
+                f"Test set size: {len(test_dataset)}")
+
 
 
 class Allen_dataloader_multi_session():
@@ -96,11 +123,11 @@ class Allen_dataloader_multi_session():
         self.common_kwargs = kwargs
 
         if verbose:
-            print(f"Total sessions: {len(self.session_ids)},
-                  Batch size: {self.params['batch_size']},
-                  Train set size: {len(train_dataset)}, 
-                  Val set size: {len(val_dataset)},
-                  Test set size: {len(test_dataset)}")
+            print(f"Total sessions: {len(self.session_ids)}, "
+                f"Batch size: {self.batch_size}, "
+                f"Train set size: {len(train_dataset)}, "
+                f"Val set size: {len(val_dataset)}, "
+                f"Test set size: {len(test_dataset)}")
         
         # Initialize session info
         self._initialize_sessions()
@@ -108,9 +135,14 @@ class Allen_dataloader_multi_session():
         # Split data into train/val/test
         self._split_data()
         
-        # Initialize iterators
-        self.current_session = None
-        self.current_batch_idx = 0
+        # # Initialize iterators
+        # self.current_session = None
+        # self.current_batch_idx = 0
+        
+        # Initialize BatchIterators
+        self.train_loader = BatchIterator(self, split='train')
+        self.val_loader = BatchIterator(self, split='val')
+        self.test_loader = BatchIterator(self, split='test')
 
     def _initialize_sessions(self):
         """Initialize metadata for all sessions"""
