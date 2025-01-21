@@ -71,8 +71,7 @@ class Simple_dataloader_from_spikes():
                                                         batch_size=self.batch_size, 
                                                         shuffle=False)
         if verbose:
-            print(f"Total trials: {self.ntrial},
-                  Batch size: {self.batch_size},
+            print(f"Total trials: {self.ntrial},Batch size: {self.batch_size},
                   Train set size: {len(train_dataset)}, 
                   Val set size: {len(val_dataset)},
                   Test set size: {len(test_dataset)}")
