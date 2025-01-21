@@ -492,8 +492,6 @@ class Allen_dataset:
             selected_presentation_ids = self.presentation_ids
         if dt is None:
             dt = 1/self.fps
-        # spikes_table = self._session.trialwise_spike_times(
-        #         self.presentation_ids, self.unit_ids, trial_time_window)
         spikes_table = self.get_spike_table(selected_presentation_ids=selected_presentation_ids)
         num_neurons = len(self.unit_ids)
         num_trials = len(self.presentation_ids)
@@ -540,65 +538,60 @@ class Allen_dataset:
             self.spike_times = metric_table
         return metric_table
     
-    def get_trial_metric_per_unit_per_trial_test(
-        self, 
-        selected_trials=None, 
-        metric_type='spike_trains', 
-        dt=None, 
-        empty_fill=np.nan, 
-        verbose=False):
-        """Optimized method to get spike trains of selected units."""
+    def get_trial_spike_trains(self, selected_trials=None, dt=None):
+        """
+        Compute spike trains as a 3D NumPy array of shape (nt, num_neurons, num_trials).
         
-        trial_time_window = [self.start_time - self.padding, self.end_time]
-        if selected_trials is not None:
-            selected_presentation_ids = self.presentation_ids[selected_trials]
-        else:
-            selected_presentation_ids = self.presentation_ids
-        
-        dt = dt or 1 / self.fps
-        spikes_table = self.get_spike_table(selected_presentation_ids=selected_presentation_ids)
-        num_neurons = len(self.unit_ids)
-
-        if metric_type == 'spike_trains':
-            time_bins = np.linspace(
-                trial_time_window[0], trial_time_window[1],
-                int((trial_time_window[1] - trial_time_window[0]) / dt) + 1
-            )
-
-        # Pre-group spikes by unit and stimulus presentation for faster access
-        spikes_grouped = spikes_table.groupby(['unit_id', 'stimulus_presentation_id'])
-
-        # Initialize an empty dictionary to store results
-        metric_data = {unit: {} for unit in self.unit_ids}
-
-        for (unit_id, stimulus_id), group in spikes_grouped:
-            spike_times = group['time_since_stimulus_presentation_onset']
+        Args:
+            selected_trials (array-like, optional): Indices of selected trials. If None, all trials are used.
+            dt (float, optional): Time bin width in seconds. If None, defaults to 1/self.fps.
             
-            if metric_type == 'count':
-                metric_data[unit_id][stimulus_id] = len(spike_times) if not spike_times.empty else empty_fill
-            elif metric_type == 'shift':
-                metric_data[unit_id][stimulus_id] = np.mean(spike_times) if not spike_times.empty else empty_fill
-            elif metric_type == 'spike_trains':
-                metric_data[unit_id][stimulus_id] = np.histogram(spike_times, time_bins)[0]
-            elif metric_type == 'spike_times':
-                metric_data[unit_id][stimulus_id] = np.array(spike_times)
-            else:
-                raise TypeError('Wrong type of metric')
+        Returns:
+            np.ndarray: Spike trains with shape (nt, num_neurons, num_trials).
+        """
+        # Set trial time window
+        trial_time_window = [self.start_time - self.padding, self.end_time]
+        selected_presentation_ids = (
+            self.presentation_ids[selected_trials]
+            if selected_trials is not None
+            else self.presentation_ids
+        )
+        dt = dt or 1 / self.fps
+        
+        # Generate time bins
+        time_bins = np.arange(trial_time_window[0], trial_time_window[1] + dt, dt)
+        nt = len(time_bins) - 1  # Number of time bins
+        num_neurons = len(self.unit_ids)
+        num_trials = len(selected_presentation_ids)
+        
+        # Initialize 3D array for spike trains
+        spike_train_array = np.zeros((nt, num_neurons, num_trials), dtype=int)
 
-        # Convert the dictionary to a DataFrame
-        metric_table = pd.DataFrame(metric_data).T
-        metric_table.index.name = 'units'
+        # Precompute neuron and trial mappings
+        neuron_idx_map = {unit_id: idx for idx, unit_id in enumerate(self.unit_ids)}
+        trial_idx_map = {stim_id: idx for idx, stim_id in enumerate(selected_presentation_ids)}
+        
+        # Get spike table
+        spikes_table = self.get_spike_table(selected_presentation_ids=selected_presentation_ids)
+        
+        # Group spikes by neuron and trial
+        grouped_spikes = spikes_table.groupby(['unit_id', 'stimulus_presentation_id'])
+        
+        # Fill spike train array
+        for (unit_id, stim_id), group in grouped_spikes:
+            neuron_idx = neuron_idx_map[unit_id]
+            trial_idx = trial_idx_map[stim_id]
+            spike_times = group['time_since_stimulus_presentation_onset'].values
+            spike_train_array[:, neuron_idx, trial_idx] = np.histogram(spike_times, bins=time_bins)[0]
 
-        # Post-process DataFrame for specific metric types
-        if metric_type not in ['spike_trains', 'spike_times']:
-            metric_table = metric_table.apply(pd.to_numeric, errors='coerce')
-        elif metric_type == 'spike_trains':
-            self.spike_train = metric_table
-        elif metric_type == 'spike_times':
-            self.spike_times = metric_table
+        # Save results
+        self.spike_train = spike_train_array
+        self.trial_index_map = trial_idx_map
+        self.neuron_index_map = neuron_idx_map
 
-        return metric_table
-
+        return {"spike_trains": spike_train_array, 
+                "presentation_ids": selected_presentation_ids, 
+                "neuron_id": self.unit_ids}
 
     def get_running(self, method="Pillow"):
         running_speed = self._session.running_speed
