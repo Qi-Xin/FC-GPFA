@@ -8,11 +8,29 @@ import matplotlib.pyplot as plt
 import scipy.stats
 
 class VAETransformer_FCGPFA(nn.Module):
-    def __init__(self, num_layers, d_model, dim_feedforward, nl_dim, spline_basis, nfactor, nneuron_list, dropout, 
-                 nhead, decoder_architecture, 
-                 npadding, nsubspace, K, nlatent, coupling_basis, use_self_coupling):
+    
+    def __init__(
+            self, 
+            num_layers, 
+            d_model, 
+            dim_feedforward, 
+            nl_dim, 
+            spline_basis, 
+            nfactor, 
+            dropout, 
+            nhead, 
+            decoder_architecture, 
+            nneuron_list, # Coupling's feature: a list containing neuron counts for each area
+            npadding, # Coupling's feature:
+            nsubspace, # Coupling's feature:
+            nlatent, # Coupling's feature:
+            coupling_basis, # Coupling's feature:
+            use_self_coupling, # Coupling's feature:
+            K, # FCGPFA's parameters
+        ):
+        
         super().__init__()
-        self.nneuron_list = nneuron_list  # this should now be a list containing neuron counts for each area
+        
         self.num_neurons = sum(self.nneuron_list)
         self.d_model = d_model
         self.nt, self.nbasis = spline_basis.shape
@@ -24,6 +42,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.decoder_architecture = decoder_architecture
         
         ### FCGPFA's additional settings
+        self.nneuron_list = nneuron_list
         self.npadding = npadding
         self.accnneuron = [0]+np.cumsum(self.nneuron_list).tolist()
         self.nsubspace = nsubspace

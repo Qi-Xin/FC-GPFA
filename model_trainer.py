@@ -17,33 +17,23 @@ If the results is good, you can save the model along with hyperparameters (aka t
 '''
 
 class Trainer:
-    def __init__(self, dataloader_compound, path, params, npadding):
-        self.data = data
+    def __init__(self, dataloader, path, params):
+        self.dataloader = dataloader
         self.path = path
-        self.npadding = npadding
         self.params = params
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.optimizer = None
-        self.train_loader = None
-        self.test_loader = None
         self.results_file = "training_results.json"
-        self.penalty_overlapping = params['penalty_overlapping']
+        self.penalty_overlapping = self.params['penalty_overlapping']
+        self.npadding = self.params['npadding']
         
         ### Get some dependent parameters
         self.narea = len(self.spikes)
         self.nneuron_list = [sp.shape[1] for sp in self.spikes]
         self.nt, self.ntrial = self.spikes[0].shape[2], self.spikes[0].shape[0]
         self.nt -= self.npadding
-
-    def initialize_data(self, verbose=False):
-        if type(self.data) == list:
-            self.dataloader = Simple_dataloader(self.data, self.params['batch_size'], self.npadding)
-        elif type(self.data) == Allen_dataloader_multi_session:
-            self.train_loader = self.data.train_loader
-            self.test_loader = self.data.test_loader
-            
-
+         
     def initialize_model(self, verbose=False):
         spline_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 
                                            num=self.params['num_B_spline_basis'], 
@@ -116,7 +106,6 @@ class Trainer:
         if verbose:
             print(f"Start training model with parameters: {self.params}")
         utils.set_seed(0)
-        self.process_data(verbose=verbose)
         self.initialize_model(verbose=verbose)
         best_test_loss = float('inf')
         best_train_loss = float('inf')
@@ -140,16 +129,18 @@ class Trainer:
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
-            for spikes_full_low_res_batch, spikes_full_batch in self.train_loader:
+            for batch in self.dataloader.train_loader:
+                spikes_full_batch = batch["spike_trains"].to(self.device)
+                spikes_full_low_res_batch = utils.downsample_spikes(spikes_full_batch, self.params['downsample_factor'])
                 spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
                 spikes_full_batch = spikes_full_batch.to(self.device)
                 self.optimizer.zero_grad()
                 firing_rate = self.model(spikes_full_low_res_batch, 
-                                                        spikes_full_batch, 
-                                                        fix_latents=fix_latents, 
-                                                        fix_stimulus=fix_stmulus, 
-                                                        only_coupling=only_coupling,
-                                                        only_stimulus=only_stimulus)
+                                        spikes_full_batch, 
+                                        fix_latents=fix_latents, 
+                                        fix_stimulus=fix_stmulus, 
+                                        only_coupling=only_coupling,
+                                        only_stimulus=only_stimulus)
                 loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
                                                 self.model.sti_mu, self.model.sti_logvar, 
                                                 beta=self.params['beta'])
@@ -268,7 +259,6 @@ class Trainer:
         checkpoint = torch.load(filename, map_location=map_location)
 
         self.params = checkpoint['params']        
-        self.process_data()
         self.initialize_model()
         self.model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Trainer instance (model and hyperparameters) loaded from {filename}")

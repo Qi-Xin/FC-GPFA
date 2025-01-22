@@ -211,6 +211,7 @@ class Allen_dataloader_multi_session():
         current_session = self.sessions[session_id]
         batch_data = current_session.get_trial_spike_trains(selected_trials=local_idx)
         batch_data['session_id'] = session_id
+        batch_data['nneuron_list'] = current_session.nneuron_list
         
         if include_behavior:
             # Load behavior data
@@ -318,7 +319,7 @@ class Allen_dataset:
         self.end_time = kwargs.get('end_time', 0.4)
         self.padding = kwargs.get('padding', 0.1)
         self.fps = kwargs.get('fps', 1e3)
-        self.area = kwargs.get('area', 'visual')
+        self.area = kwargs.get('area', 'cortex')
 
         if verbose:
             logger = logging.getLogger(__name__)
@@ -374,14 +375,20 @@ class Allen_dataset:
             self.presentation_table = get_fake_stimulus_presentations(self._session.stimulus_presentations, time_window=0.5)
         
         # Get units
-        if self.area == 'visual':
-            self.selected_units = self._session.units[
-                self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
-                self._session.units['probe_description'].isin(self.selected_probes)]
-        else:
-            self.selected_units = self._session.units[
-                self._session.units['probe_description'].isin(self.selected_probes)]
-        self.unit_ids = self.selected_units.index.values
+        self.nneuron_list = []
+        self.unit_ids = []
+        for probe in self.selected_probes:
+            if self.area == 'cortex':
+                selected_units = self._session.units[
+                    self._session.units['ecephys_structure_acronym'].isin(utils.VISUAL_AREA) &
+                    self._session.units['probe_description'].isin([probe])
+                ]
+            else:
+                selected_units = self._session.units[
+                    self._session.units['probe_description'].isin([probe])]
+            self.nneuron_list.append(len(selected_units))
+            self.unit_ids.append(selected_units.index.values)
+        self.unit_ids = np.concatenate(self.unit_ids)
 
         self.presentation_times = self.presentation_table.start_time.values
         self.presentation_ids = self.presentation_table.index.values
