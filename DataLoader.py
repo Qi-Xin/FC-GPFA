@@ -580,8 +580,6 @@ class Allen_dataset:
         
         # Initialize 3D array for spike trains
         spike_train_array = np.zeros((nt, num_neurons, num_trials), dtype=int)
-        spike_train_array22222 = np.zeros((nt//10, num_neurons, num_trials), dtype=int)
-        time_bins22222 = np.arange(trial_time_window[0], trial_time_window[1] + 10*dt, 10*dt)
 
         # Precompute neuron and trial mappings
         neuron_idx_map = {unit_id: idx for idx, unit_id in enumerate(self.unit_ids)}
@@ -599,7 +597,6 @@ class Allen_dataset:
             trial_idx = trial_idx_map[stim_id]
             spike_times = group['time_since_stimulus_presentation_onset'].values
             spike_train_array[:, neuron_idx, trial_idx] = np.histogram(spike_times, bins=time_bins)[0]
-            spike_train_array22222[:, neuron_idx, trial_idx] = np.histogram(spike_times, bins=time_bins22222)[0]
 
         # Save results
         self.spike_train = spike_train_array
