@@ -25,14 +25,14 @@ class BatchIterator:
         self.current_batch_idx = 0  # Local batch index
 
     def __iter__(self):
-        self.dataloader.reset(split=self.split)  # Reset on new iteration
         self.current_batch_idx = 0
         return self
 
     def __next__(self):
         if self.current_batch_idx >= len(getattr(self.dataloader, f"{self.split}_batches")):
             raise StopIteration
-        batch = self.dataloader.get_batch(split=self.split)
+        batch = self.dataloader.get_batch(current_batch_idx=self.current_batch_idx,
+                                          split=self.split)
         self.current_batch_idx += 1
         return batch
     
@@ -105,7 +105,7 @@ class Simple_dataloader_from_spikes():
 
 
 class Allen_dataloader_multi_session():
-    def __init__(self, session_ids, **kwargs):
+    def __init__(self, session_ids, verbose=True, **kwargs):
         """
         Args:
             session_ids (list): List of session IDs to load
@@ -116,18 +116,11 @@ class Allen_dataloader_multi_session():
             **kwargs: Additional arguments passed to Allen_dataset
         """
         self.session_ids = session_ids if isinstance(session_ids, list) else [session_ids]
-        self.train_ratio = kwargs.pop('train_ratio', 0.7)
-        self.val_ratio = kwargs.pop('val_ratio', 0.1)
-        self.batch_size = kwargs.pop('batch_size', 32)
-        self.shuffle = kwargs.pop('shuffle', True)
+        self.train_ratio = kwargs.get('train_ratio', 0.7)
+        self.val_ratio = kwargs.get('val_ratio', 0.1)
+        self.batch_size = kwargs.get('batch_size', 32)
+        self.shuffle = kwargs.get('shuffle', True)
         self.common_kwargs = kwargs
-
-        if verbose:
-            print(f"Total sessions: {len(self.session_ids)}, "
-                f"Batch size: {self.batch_size}, "
-                f"Train set size: {len(train_dataset)}, "
-                f"Val set size: {len(val_dataset)}, "
-                f"Test set size: {len(test_dataset)}")
         
         # Initialize session info
         self._initialize_sessions()
@@ -137,12 +130,19 @@ class Allen_dataloader_multi_session():
         
         # # Initialize iterators
         # self.current_session = None
-        # self.current_batch_idx = 0
+        self.current_batch_idx = 0
         
         # Initialize BatchIterators
         self.train_loader = BatchIterator(self, split='train')
         self.val_loader = BatchIterator(self, split='val')
         self.test_loader = BatchIterator(self, split='test')
+        
+        if verbose:
+            print(f"Total sessions: {len(self.session_ids)}, "
+                f"Batch size: {self.batch_size}, "
+                f"Train set size: {len(self.train_loader)}, "
+                f"Val set size: {len(self.val_loader)}, "
+                f"Test set size: {len(self.test_loader)}")
 
     def _initialize_sessions(self):
         """Initialize metadata for all sessions"""
@@ -218,7 +218,7 @@ class Allen_dataloader_multi_session():
         
         return batch_data
 
-    def get_batch(self, split='train'):
+    def get_batch(self, current_batch_idx, split, include_behavior=False):
         """Get next batch for specified split"""
         if split == 'train':
             batches = self.train_batches
@@ -229,18 +229,9 @@ class Allen_dataloader_multi_session():
         else:
             raise ValueError(f"Invalid split: {split}")
 
-        if self.current_batch_idx >= len(batches):
-            self.reset(split=split)
-
-        batch = self._load_batch(batches[self.current_batch_idx])
-        self.current_batch_idx += 1
+        batch = self._load_batch(batches[current_batch_idx], 
+                                 include_behavior=include_behavior)
         return batch
-
-    def reset(self, split='train'):
-        """Reset batch iterator for specified split"""
-        self.current_batch_idx = 0
-        if self.shuffle and split == 'train':
-            np.random.shuffle(self.train_batches)
 
 
 def combine_stimulus_presentations(stimulus_presentations, time_window=0.49):
@@ -314,23 +305,21 @@ class Allen_dataset:
     def __init__(self, verbose=False, **kwargs):
 
         self.source = "Allen"
-        self.session_id = kwargs.pop('session_id', 791319847)
-        self.selected_probes = kwargs.pop('selected_probes', 'all')
-        self.align_stimulus_onset = kwargs.pop('align_stimulus_onset', True)
-        self.merge_trials = kwargs.pop('merge_trials', False)
-        self.stimulus_name = kwargs.pop('stimulus_name', "all")
-        self.orientation = kwargs.pop('orientation', None)
-        self.temporal_frequency = kwargs.pop('temporal_frequency', None)
-        self.contrast = kwargs.pop('contrast', None)
-        self.stimulus_condition_id = kwargs.pop('stimulus_condition_id', None)
-        self.start_time = kwargs.pop('start_time', 0)
-        self.end_time = kwargs.pop('end_time', 0.4)
-        self.padding = kwargs.pop('padding', 0.1)
-        self.fps = kwargs.pop('fps', 1e3)
-        self.area = kwargs.pop('area', 'visual')
-
+        self.session_id = kwargs.get('session_id', 791319847)
+        self.selected_probes = kwargs.get('selected_probes', 'all')
+        self.align_stimulus_onset = kwargs.get('align_stimulus_onset', True)
+        self.merge_trials = kwargs.get('merge_trials', False)
+        self.stimulus_name = kwargs.get('stimulus_name', "all")
+        self.orientation = kwargs.get('orientation', None)
+        self.temporal_frequency = kwargs.get('temporal_frequency', None)
+        self.contrast = kwargs.get('contrast', None)
+        self.stimulus_condition_id = kwargs.get('stimulus_condition_id', None)
+        self.start_time = kwargs.get('start_time', 0)
+        self.end_time = kwargs.get('end_time', 0.4)
         self.padding = kwargs.get('padding', 0.1)
-        self.fps = kwargs.get('fps', 1e2)
+        self.fps = kwargs.get('fps', 1e3)
+        self.area = kwargs.get('area', 'visual')
+
         if verbose:
             logger = logging.getLogger(__name__)
             logger.info(f"Align stimulus: {self.align_stimulus}")
@@ -581,7 +570,7 @@ class Allen_dataset:
             if selected_trials is not None
             else self.presentation_ids
         )
-        dt = dt or 1 / self.fps
+        dt = dt if dt is not None else 1 / self.fps
         
         # Generate time bins
         time_bins = np.arange(trial_time_window[0], trial_time_window[1] + dt, dt)
@@ -591,6 +580,8 @@ class Allen_dataset:
         
         # Initialize 3D array for spike trains
         spike_train_array = np.zeros((nt, num_neurons, num_trials), dtype=int)
+        spike_train_array22222 = np.zeros((nt//10, num_neurons, num_trials), dtype=int)
+        time_bins22222 = np.arange(trial_time_window[0], trial_time_window[1] + 10*dt, 10*dt)
 
         # Precompute neuron and trial mappings
         neuron_idx_map = {unit_id: idx for idx, unit_id in enumerate(self.unit_ids)}
@@ -608,6 +599,7 @@ class Allen_dataset:
             trial_idx = trial_idx_map[stim_id]
             spike_times = group['time_since_stimulus_presentation_onset'].values
             spike_train_array[:, neuron_idx, trial_idx] = np.histogram(spike_times, bins=time_bins)[0]
+            spike_train_array22222[:, neuron_idx, trial_idx] = np.histogram(spike_times, bins=time_bins22222)[0]
 
         # Save results
         self.spike_train = spike_train_array
