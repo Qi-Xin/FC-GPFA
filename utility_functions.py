@@ -194,10 +194,15 @@ def change_temporal_resolution(spikes, num_merge):
     return [change_temporal_resolution_single(spikes[i], num_merge) for i in range(len(spikes))]
 
 def change_temporal_resolution_single(spike_train, num_merge):
-    ntrial, nneuron, nt = spike_train.shape
-    new_spike_train = np.zeros((ntrial, nneuron, nt//num_merge))
-    for t in range(nt//num_merge):
-        new_spike_train[:,:,t] = np.sum(spike_train[:,:,t*num_merge:(t+1)*num_merge], axis=2)
+    nt, nneuron, ntrial = spike_train.shape
+    if isinstance(spike_train, torch.Tensor):
+        new_spike_train = torch.zeros((nt//num_merge, nneuron, ntrial), device=spike_train.device)
+        for t in range(nt//num_merge):
+            new_spike_train[t,:,:] = torch.sum(spike_train[t*num_merge:(t+1)*num_merge,:,:], dim=0)
+    else:
+        new_spike_train = np.zeros((nt//num_merge, nneuron, ntrial))
+        for t in range(nt//num_merge):
+            new_spike_train[t,:,:] = np.sum(spike_train[t*num_merge:(t+1)*num_merge,:,:], axis=0)
     return new_spike_train
 
 

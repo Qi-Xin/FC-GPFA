@@ -244,8 +244,8 @@ class VAETransformer_FCGPFA(nn.Module):
             ])
         self.current_session_id = session_id
 
-        spike_trains = src['spike_trains']
-        low_res_spike_trains = utils.change_temporal_resolution_single(spike_trains, 10)
+        low_res_spike_trains = src['low_res_spike_trains']
+
         self.ntrial = low_res_spike_trains.shape[0]
         self.sti_z, self.sti_mu, self.sti_logvar = (
             None, 
@@ -282,8 +282,8 @@ class VAETransformer_FCGPFA(nn.Module):
             return self.firing_rates_combined
     
     def encode(self, src):
-        # src: mnt
-        src = src.permute(2, 0, 1)
+        # src: tnm
+        src = src.permute(0, 2, 1)
         src = self.token_converter_dict[self.current_session_id](src)
         # src: ntokens x batch_size x d_model (tmn)
         

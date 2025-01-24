@@ -65,36 +65,36 @@ class Trainer:
             coupling_strength_cov_kernel=K,           
         ).to(self.device)
         ################################
-        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
         
-        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
-        sti_group = ['sti_readout_matrices', 'sti_decoder', 'sti_inhomo']
-        cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
-                    'cp_weight_sending', 'cp_weight_receiving']
+        # transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
+        # sti_group = ['sti_readout_matrices', 'sti_decoder', 'sti_inhomo']
+        # cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
+        #             'cp_weight_sending', 'cp_weight_receiving']
         
-        # Define different learning rates
-        transformer_lr = self.params['lr_transformer']
-        sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
-        cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
-        weight_decay = self.params['weight_decay']
+        # # Define different learning rates
+        # transformer_lr = self.params['lr_transformer']
+        # sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
+        # cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
+        # weight_decay = self.params['weight_decay']
 
-        # Configure optimizer with two parameter groups
-        params_not_assigned = [n for n, p in self.model.named_parameters()
-            if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
-        if len(params_not_assigned)!=0:
-            print(params_not_assigned)
-            raise ValueError("Some parameters are not assigned to any group.")
-        self.optimizer = optim.Adam([
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in transformer_group])], 
-             'lr': transformer_lr},
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in sti_group])], 
-             'lr': sti_lr},
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in cp_group])], 
-             'lr': cp_lr},
-        ], weight_decay=weight_decay)
+        # # Configure optimizer with two parameter groups
+        # params_not_assigned = [n for n, p in self.model.named_parameters()
+        #     if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
+        # if len(params_not_assigned)!=0:
+        #     print(params_not_assigned)
+        #     raise ValueError("Some parameters are not assigned to any group.")
+        # self.optimizer = optim.Adam([
+        #     {'params': [p for n, p in self.model.named_parameters() 
+        #                 if any([key_word in n for key_word in transformer_group])], 
+        #      'lr': transformer_lr},
+        #     {'params': [p for n, p in self.model.named_parameters() 
+        #                 if any([key_word in n for key_word in sti_group])], 
+        #      'lr': sti_lr},
+        #     {'params': [p for n, p in self.model.named_parameters() 
+        #                 if any([key_word in n for key_word in cp_group])], 
+        #      'lr': cp_lr},
+        # ], weight_decay=weight_decay)
         ################################
         if verbose:
             print(f"Model initialized. Training on {self.device}")
@@ -130,9 +130,11 @@ class Trainer:
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
             for batch in self.dataloader.train_loader:
-                spikes_full_batch = batch["spike_trains"].to(self.device)
-                spikes_full_low_res_batch = utils.downsample_spikes(spikes_full_batch, self.params['downsample_factor'])
-                spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
+                batch["spike_trains"].to(self.device)
+                batch["low_res_spike_trains"] = utils.change_temporal_resolution_single(
+                    batch["spike_trains"], self.params['downsample_factor']
+                )
+                batch["low_res_spike_trains"].to(self.device)
                 spikes_full_batch = spikes_full_batch.to(self.device)
                 self.optimizer.zero_grad()
                 firing_rate = self.model(spikes_full_low_res_batch, 
