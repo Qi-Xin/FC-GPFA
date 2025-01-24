@@ -6,81 +6,92 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats
+import utility_functions as utils
 
 class VAETransformer_FCGPFA(nn.Module):
     
     def __init__(
             self, 
-            num_layers, 
-            d_model, 
-            dim_feedforward, 
-            nl_dim, 
-            spline_basis, 
-            nfactor, 
-            dropout, 
-            nhead, 
-            decoder_architecture, 
-            nneuron_list, # Coupling's feature: a list containing neuron counts for each area
-            npadding, # Coupling's feature:
-            nsubspace, # Coupling's feature:
-            nlatent, # Coupling's feature:
-            coupling_basis, # Coupling's feature:
-            use_self_coupling, # Coupling's feature:
-            K, # FCGPFA's parameters
+            transformer_num_layers: int, 
+            transformer_d_model: int, 
+            transformer_dim_feedforward: int, 
+            transformer_vae_output_dim: int, 
+            stimulus_basis: torch.Tensor, 
+            stimulus_nfactor: int, 
+            transformer_dropout: float, 
+            transformer_nhead: int, 
+            stimulus_decoder_inter_dim_factor: int, 
+            narea: int,
+            npadding: int, # Coupling's feature:
+            coupling_nsubspace: int, # Coupling's feature:
+            coupling_basis: torch.Tensor, # Coupling's feature:
+            use_self_coupling: bool, # Coupling's feature:
+            coupling_strength_nlatent: int, # Coupling's feature:
+            coupling_strength_cov_kernel: float, # Coupling's parameters
         ):
+        # Things that are specific to each session:
+        # nneuron_list_dict, num_neurons_dict, accnneuron_dict
+        # sti_readout_matrices_dict, token_converter_dict
         
         super().__init__()
-        
-        self.num_neurons = sum(self.nneuron_list)
-        self.d_model = d_model
-        self.nt, self.nbasis = spline_basis.shape
-        self.narea = len(self.nneuron_list)
-        self.nfactor = nfactor
-        self.nl_dim = nl_dim
-        self.nhead = nhead
+        self.transformer_num_layers = transformer_num_layers
+        self.transformer_d_model = transformer_d_model
+        self.transformer_dim_feedforward = transformer_dim_feedforward
+        self.transformer_vae_output_dim = transformer_vae_output_dim
+        self.transformer_nhead = transformer_nhead
+        self.nt, self.stimulus_nbasis = stimulus_basis.shape
+        self.stimulus_nfactor = stimulus_nfactor
+        self.stimulus_decoder_inter_dim_factor = stimulus_decoder_inter_dim_factor
+        self.transformer_dropout = transformer_dropout
+        self.narea = narea
         self.sample_latent = False  # This will be changed in "Trainer"
-        self.decoder_architecture = decoder_architecture
+        self.num_neurons_dict = {}    
         
         ### FCGPFA's additional settings
-        self.nneuron_list = nneuron_list
+        self.nneuron_list_dict = {}
+        self.accnneuron_dict = {}
         self.npadding = npadding
-        self.accnneuron = [0]+np.cumsum(self.nneuron_list).tolist()
-        self.nsubspace = nsubspace
-        self.K = K
-        self.nlatent = nlatent
+        self.coupling_nsubspace = coupling_nsubspace
+        self.coupling_strength_cov_kernel = coupling_strength_cov_kernel
+        self.coupling_strength_nlatent = coupling_strength_nlatent
         self.use_self_coupling = use_self_coupling
 
         ### VAETransformer's parameters
-        # self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
-        self.token_converter = nn.Linear(self.num_neurons, self.d_model)
-        transformer_encoder_layer = TransformerEncoderLayer(d_model=self.d_model, 
-                                                            nhead=self.nhead,
-                                                            dim_feedforward=dim_feedforward, 
+        # self.cls_token = nn.Parameter(torch.randn(1, 1, self.transformer_d_model))
+        self.token_converter_dict = {}
+        transformer_encoder_layer = TransformerEncoderLayer(d_model=self.transformer_d_model, 
+                                                            nhead=self.transformer_nhead,
+                                                            dim_feedforward=self.transformer_dim_feedforward, 
                                                             activation='gelu',
-                                                            dropout=dropout,
+                                                            dropout=self.transformer_dropout,
                                                             batch_first=True)
-        self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=num_layers)
-        self.to_latent = nn.Linear(self.d_model, nl_dim * 2)  # Output mu and log-variance for each dimension
+        self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=transformer_num_layers)
+        self.to_latent = nn.Linear(self.transformer_d_model, 
+                                   self.transformer_vae_output_dim * 2)  # Output mu and log-variance for each dimension
         
-        if self.decoder_architecture == 0:
-            self.sti_decoder = nn.Linear(nl_dim, self.nbasis * self.narea * self.nfactor)
+        if self.stimulus_decoder_inter_dim_factor == 0:
+            self.sti_decoder = nn.Linear(self.transformer_vae_output_dim, 
+                                         self.stimulus_nbasis * self.narea * self.stimulus_nfactor)
             torch.nn.init.kaiming_uniform_(self.sti_decoder.weight, mode='fan_in', nonlinearity='relu')
         else:
             # Enhanced sti_decoder with additional layers and non-linearities
             self.sti_decoder = nn.Sequential(
-                nn.Linear(nl_dim, nl_dim * self.decoder_architecture),  # Expand dimension
-                nn.ReLU(),                      # Non-linear activation
+                nn.Linear(self.transformer_vae_output_dim, 
+                          self.transformer_vae_output_dim * self.stimulus_decoder_inter_dim_factor),
+                nn.ReLU(), # Non-linear activation
                 # Final output to match required dimensions
-                nn.Linear(nl_dim* self.decoder_architecture, self.nbasis * self.narea * self.nfactor)  
+                nn.Linear(self.transformer_vae_output_dim * self.stimulus_decoder_inter_dim_factor, 
+                          self.stimulus_nbasis * self.narea * self.stimulus_nfactor)  
             )
             torch.nn.init.kaiming_uniform_(self.sti_decoder[0].weight, mode='fan_in', nonlinearity='relu')
             torch.nn.init.kaiming_uniform_(self.sti_decoder[2].weight, mode='fan_in', nonlinearity='relu')
             
-        self.spline_basis = spline_basis  # Assume spline_basis is nt x 30
-        self.sti_readout_matrices = nn.ModuleList([nn.Linear(self.nfactor, neurons) for neurons in self.nneuron_list])
-        self.positional_encoding = PositionalEncoding(self.d_model)
-        
-        self.sti_inhomo = nn.Parameter(torch.zeros(self.narea, self.nfactor, self.nbasis))
+        self.stimulus_basis = stimulus_basis  # Assume stimulus_basis is of size (nt, number of basis)
+        self.sti_readout_matrices_dict = {}
+
+        # Positional encoding doesn't have dropout for now
+        self.positional_encoding = PositionalEncoding(self.transformer_d_model) 
+        self.sti_inhomo = nn.Parameter(torch.zeros(self.narea, self.stimulus_nfactor, self.stimulus_nbasis))
         
         ### FCGPFA's parameters
         # NOT needed to do gradient descent on these parameters
@@ -92,44 +103,44 @@ class VAETransformer_FCGPFA(nn.Module):
         self.coupling_basis = coupling_basis
         
         # Do gradient descent on these parameters
-        self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.nlatent) * 2 - 1))
+        self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.coupling_strength_nlatent) * 2 - 1))
         self.cp_time_varying_coef_offset = nn.Parameter(1.0 * (torch.ones(self.narea, self.narea, 1, 1)))
         
         self.cp_beta_coupling = nn.ModuleList([
             nn.ParameterList([
-                    nn.Parameter(1.0*(torch.ones(coupling_basis.shape[1], self.nsubspace)+\
-                        0.1*torch.randn(coupling_basis.shape[1], self.nsubspace)))
+                    nn.Parameter(1.0*(torch.ones(coupling_basis.shape[1], self.coupling_nsubspace)+\
+                        0.1*torch.randn(coupling_basis.shape[1], self.coupling_nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
         
         self.cp_weight_sending = nn.ModuleList([
             nn.ParameterList([
-                    nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.nsubspace)*\
-                        (torch.ones(self.nneuron_list[iarea], self.nsubspace)+\
-                            0.1*torch.randn(self.nneuron_list[iarea], self.nsubspace)))
+                    nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.coupling_nsubspace)*\
+                        (torch.ones(self.nneuron_list[iarea], self.coupling_nsubspace)+\
+                            0.1*torch.randn(self.nneuron_list[iarea], self.coupling_nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
         
         self.cp_weight_receiving = nn.ModuleList([
             nn.ParameterList([
-                    nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.nsubspace)*\
-                        (torch.ones(self.nneuron_list[jarea], self.nsubspace)+\
-                            0.1*torch.randn(self.nneuron_list[jarea], self.nsubspace)))
+                    nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.coupling_nsubspace)*\
+                        (torch.ones(self.nneuron_list[jarea], self.coupling_nsubspace)+\
+                            0.1*torch.randn(self.nneuron_list[jarea], self.coupling_nsubspace)))
                 for jarea in range(self.narea)])
             for iarea in range(self.narea)])
 
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
         if fix_latents:
-            self.latents = torch.zeros(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
-            # self.latents = torch.ones(self.ntrial, self.nlatent, self.nt, device=self.cp_latents_readout.device)
+            self.latents = torch.zeros(self.ntrial, self.coupling_strength_nlatent, self.nt, device=self.cp_latents_readout.device)
+            # self.latents = torch.ones(self.ntrial, self.coupling_strength_nlatent, self.nt, device=self.cp_latents_readout.device)
             # self.latents[:,:,:150] = -1
             return None
         # Get the best latents under the current model
         with torch.no_grad():
             # weight: mnlt
             # bias: mnt
-            weight = torch.zeros(self.ntrial, self.num_neurons, self.nlatent, self.nt, device=device)
+            weight = torch.zeros(self.ntrial, self.num_neurons, self.coupling_strength_nlatent, self.nt, device=device)
             bias = torch.zeros(self.ntrial, self.num_neurons, self.nt, device=device)
             bias += self.firing_rates_stimulus
             for iarea in range(self.narea):
@@ -149,7 +160,7 @@ class VAETransformer_FCGPFA(nn.Module):
                         )
         
         self.mu, self.hessian, self.lambd, self.elbo = gpfa_poisson_fix_weights(
-            self.spikes_full[:,:,self.npadding:], weight, self.K, 
+            self.spikes_full[:,:,self.npadding:], weight, self.coupling_strength_cov_kernel, 
             initial_mu=None, initial_hessian=None, bias=bias, 
             lr=lr, max_iter=max_iter, tol=tol, verbose=False)
         self.latents = self.mu
@@ -208,47 +219,72 @@ class VAETransformer_FCGPFA(nn.Module):
                 + self.cp_time_varying_coef_offset
             ]
 
-    def forward(self, src, spikes_full, 
-                fix_latents=False, fix_stimulus=False,
-                only_coupling=False, only_stimulus=False,):
-        assert not (only_coupling and only_stimulus), 'Cannot have both only_coupling and only_stimulus'
-        self.spikes_full = spikes_full
-        self.ntrial = spikes_full.shape[0]
-        self.sti_z, self.sti_mu, self.sti_logvar = (None, 
-                                            torch.zeros(self.ntrial, self.nl_dim), 
-                                            torch.zeros(self.ntrial, self.nl_dim))
+    def forward(self, 
+                src,
+                fix_latents=False, 
+                fix_stimulus=False,
+                include_coupling=True, 
+                include_stimulus=True,
+        ):
+        assert include_coupling or include_stimulus, 'Need to have either coupling or stimulus'
+
+        # Doing session-specific things
+        session_id = src['session_id']
+        if session_id not in self.nneuron_list_dict:
+            nneuron_list = src['nneuron_list']
+            self.nneuron_list_dict[session_id] = nneuron_list
+            self.accnneuron_dict[session_id] = [0]+np.cumsum(nneuron_list).tolist()
+            self.num_neurons_dict[session_id] = sum(nneuron_list)
+            self.token_converter_dict[session_id] = nn.Linear(
+                self.num_neurons_dict[session_id], 
+                self.transformer_d_model
+            )
+            self.sti_readout_matrices_dict[session_id] = nn.ModuleList([
+                nn.Linear(self.stimulus_nfactor, nneurons) for nneurons in self.nneuron_list_dict[session_id]
+            ])
+        self.current_session_id = session_id
+
+        spike_trains = src['spike_trains']
+        low_res_spike_trains = utils.change_temporal_resolution_single(spike_trains, 10)
+        self.ntrial = low_res_spike_trains.shape[0]
+        self.sti_z, self.sti_mu, self.sti_logvar = (
+            None, 
+            torch.zeros(self.ntrial, self.transformer_vae_output_dim), 
+            torch.zeros(self.ntrial, self.transformer_vae_output_dim)
+        ) # Set here so 
         
         ### VAETransformer's forward pass
-        if not only_coupling:
+        if include_stimulus:
             if fix_stimulus:
                 self.get_inhomo_firing_rates_stimulus()
             else:
-                self.sti_mu, self.sti_logvar = self.encode(src)
+                self.sti_mu, self.sti_logvar = self.encode(low_res_spike_trains)
                 self.sti_z = self.sample_a_latent(self.sti_mu, self.sti_logvar)
                 self.firing_rates_stimulus = self.decode(self.sti_z)
         
         ### FCGPFA's forward pass 
         # Get latents
-        if not only_stimulus:
+        if include_coupling:
             self.get_coupling_outputs()
             self.get_latents(fix_latents=fix_latents)
             self.get_firing_rates_coupling()
         
         ### Return the combined firing rates
-        if only_coupling:
+        if include_coupling and (not include_stimulus):
             self.firing_rates_combined = -5 + self.firing_rates_coupling
             return self.firing_rates_combined
-        if only_stimulus:
+        elif include_stimulus and (not include_coupling):
             self.firing_rates_combined = -5 + self.firing_rates_stimulus
             return self.firing_rates_combined
-        self.firing_rates_combined = -5 + self.firing_rates_stimulus + self.firing_rates_coupling
-        self.overlapping_scale = (self.firing_rates_stimulus - self.firing_rates_coupling).abs().mean()
-        return self.firing_rates_combined
+        else:
+            self.firing_rates_combined = -5 + self.firing_rates_stimulus + self.firing_rates_coupling
+            self.overlapping_scale = (self.firing_rates_stimulus - self.firing_rates_coupling).abs().mean()
+            return self.firing_rates_combined
     
     def encode(self, src):
         # src: mnt
         src = src.permute(2, 0, 1)
-        src = self.token_converter(src)
+        src = self.token_converter_dict[self.current_session_id](src)
         # src: ntokens x batch_size x d_model (tmn)
         
         # Append CLS token to the beginning of each sequence
@@ -269,7 +305,6 @@ class VAETransformer_FCGPFA(nn.Module):
             std = torch.exp(0.5 * sti_logvar)
             eps = torch.randn_like(1*std)
             return mu + eps * std
-            # return mu
         else:
             return mu
         
@@ -278,14 +313,14 @@ class VAETransformer_FCGPFA(nn.Module):
         # return proj-3
         
         proj = self.sti_decoder(z)  # batch_size x (nbasis * narea * nfactor)
-        proj = proj.view(-1, self.narea, self.nfactor, self.nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
+        proj = proj.view(-1, self.narea, self.stimulus_nfactor, self.stimulus_nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
         
-        # Apply spline_basis per area
-        self.factors = torch.einsum('mafb,tb->matf', proj, self.spline_basis)  # batch_size x narea x nt x nfactor**matf**
+        # Apply stimulus_basis per area
+        self.factors = torch.einsum('mafb,tb->matf', proj, self.stimulus_basis)  # batch_size x narea x nt x nfactor**matf**
         
         # Prepare to collect firing rates from each area
         firing_rates_list = []
-        for i_area, readout_matrix in enumerate(self.sti_readout_matrices):
+        for i_area, readout_matrix in enumerate(self.sti_readout_matrices_dict[self.current_session_id]):
             # Extract factors for the current area
             area_factors = self.factors[:, i_area, :, :]  # batch_size x nt x nfactor (mtf)
             firing_rates = readout_matrix(area_factors)  # batch_size x nt x nneuron_area[i_area] (mtn)
@@ -298,9 +333,9 @@ class VAETransformer_FCGPFA(nn.Module):
     def get_inhomo_firing_rates_stimulus(self):
         # self.sti_inhomo: narea x nfactor x nbasis **afb**
         # narea x nt x nfactor **atf**
-        self.factors = torch.einsum('afb,tb->atf', self.sti_inhomo, self.spline_basis)
+        self.factors = torch.einsum('afb,tb->atf', self.sti_inhomo, self.stimulus_basis)
         firing_rates_list = []
-        for i_area, readout_matrix in enumerate(self.sti_readout_matrices):
+        for i_area, readout_matrix in enumerate(self.sti_readout_matrices_dict[self.current_session_id]):
             # nt x nfactor (tf)
             area_factors = self.factors[i_area, :, :]
             # nt x nneuron_area[i_area] (tn)
@@ -316,7 +351,7 @@ class VAETransformer_FCGPFA(nn.Module):
         
         # KL divergence
         kl_div = torch.mean(-0.5 * (1 + sti_logvar - mu.pow(2) - sti_logvar.exp()))
-        kl_div *= self.nl_dim/(self.num_neurons*self.nt)
+        kl_div *= self.transformer_vae_output_dim/(self.num_neurons*self.nt)
         return poisson_loss + beta * kl_div
         # return poisson_loss
 
@@ -345,7 +380,7 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
 
     Args:
         Y (torch.Tensor): Tensor of shape (ntrial, nneuron, nt) representing the spike counts.
-        weights (torch.Tensor): Tensor of shape (ntrial, nneuron, nlatent, nt) representing the weights.
+        weights (torch.Tensor): Tensor of shape (ntrial, nneuron, coupling_strength_nlatent, nt) representing the weights.
         K (torch.Tensor): Tensor of shape (nt, nt) representing the covariance matrix of the latents.
         bias (float, optional): Bias term. Defaults to None.
         max_iter (int, optional): Maximum number of iterations. Defaults to 10.
@@ -353,13 +388,13 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
         verbose (bool, optional): Whether to print iteration information. Defaults to False.
 
     Returns:
-        mu (torch.Tensor): Tensor of shape (ntrial, nlatent, nt) representing the estimated latents.
-        hessian (torch.Tensor): Tensor of shape (ntrial, nlatent, nt, nt) representing the Hessian matrix.
+        mu (torch.Tensor): Tensor of shape (ntrial, coupling_strength_nlatent, nt) representing the estimated latents.
+        hessian (torch.Tensor): Tensor of shape (ntrial, coupling_strength_nlatent, nt, nt) representing the Hessian matrix.
         lambd (torch.Tensor): Tensor of shape (ntrial, nneuron, nt) representing the estimated Poisson rates.
     """
     
     device = Y.device
-    ntrial, nneuron, nlatent, nt = weights.shape
+    ntrial, nneuron, coupling_strength_nlatent, nt = weights.shape
 
     # Expand Y dimensions if needed
     if Y.ndimension() == 2:
@@ -369,7 +404,7 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
     if initial_mu is not None:
         mu = initial_mu
     else:
-        mu = torch.zeros(ntrial, nlatent, nt, device=device)
+        mu = torch.zeros(ntrial, coupling_strength_nlatent, nt, device=device)
     mu_record = []
     
     # Inverse of K with regularization
@@ -377,7 +412,7 @@ def gpfa_poisson_fix_weights(Y, weights, K, initial_mu=None, initial_hessian=Non
     if initial_hessian is not None:
         hessian = initial_hessian
     else:
-        hessian = inv_K.unsqueeze(0).unsqueeze(0).repeat(ntrial, nlatent, 1, 1)
+        hessian = inv_K.unsqueeze(0).unsqueeze(0).repeat(ntrial, coupling_strength_nlatent, 1, 1)
     if bias is None:
         bias = torch.tensor(4.0, device=device)
     else:
@@ -592,12 +627,12 @@ def conv_subspace(raw_input, kernel, npadding=None, enforce_causality=True):
 
     Args:
         raw_input (torch.Tensor): Input tensor of shape (ntrial, nneuroni, nt).
-        kernel (torch.Tensor): Convolution kernel of shape (ntau, nsubspace).
+        kernel (torch.Tensor): Convolution kernel of shape (ntau, coupling_nsubspace).
         npadding (int, optional): Number of padding time to remove from the output. Defaults to None.
         enforce_causality (bool, optional): Whether to enforce causality by zero-padding the kernel. Defaults to True.
 
     Returns:
-        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nsubspace, nt).
+        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, coupling_nsubspace, nt).
 
     Raises:
         AssertionError: If the number of neurons in the kernel is not the same as the input.

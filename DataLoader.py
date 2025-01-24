@@ -15,6 +15,7 @@ import utility_functions as utils
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 from collections import defaultdict
 from tqdm import tqdm
+import torch
 
 
 class BatchIterator:
@@ -263,7 +264,7 @@ def combine_stimulus_presentations(stimulus_presentations, time_window=0.49):
         else:
             # If the last combined stimulus presentation is the same as the current one,
             # we combine them and update the stop time.
-            combined_stimulus_presentations[-1]["stop_time"] = row["stop_time"]            
+            combined_stimulus_presentations[-1]["stop_time"] = row["stop_time"]
     return pd.DataFrame(combined_stimulus_presentations)
 
 
@@ -295,7 +296,7 @@ def get_fake_stimulus_presentations(presentation_table, time_window=0.5,
         'start_time': start_times,
         'stop_time': [start + time_window for start in start_times]
     }, index=pd.RangeIndex(len(start_times), name='stimulus_presentation_id'))
-    
+
     return fake_stimulus_presentations
 
 
@@ -373,7 +374,8 @@ class Allen_dataset:
         else:
             # The trials are just random say 0.5 sec long sections in the session. 
             self.presentation_table = get_fake_stimulus_presentations(self._session.stimulus_presentations, time_window=0.5)
-        
+        self.presentation_table.reset_index(drop=True, inplace=True)
+
         # Get units
         self.nneuron_list = []
         self.unit_ids = []

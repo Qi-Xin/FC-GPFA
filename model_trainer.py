@@ -8,7 +8,7 @@ from VAETransformer_FCGPFA import VAETransformer_FCGPFA, get_K
 import utility_functions as utils
 import GLM
 import matplotlib.pyplot as plt
-from DataLoader import Allen_dataloader_multi_session, Simple_dataloader
+from DataLoader import Allen_dataloader_multi_session, Simple_dataloader_from_spikes
 '''
 First, load data "spikes", set path, set hyperparameters, and use these three to create a Trainer object.
 Then, call the trainer.train() method to train the model, which use early stop. 
@@ -26,19 +26,19 @@ class Trainer:
         self.optimizer = None
         self.results_file = "training_results.json"
         self.penalty_overlapping = self.params['penalty_overlapping']
-        self.npadding = self.params['npadding']
         
         ### Get some dependent parameters
-        self.narea = len(self.spikes)
-        self.nneuron_list = [sp.shape[1] for sp in self.spikes]
-        self.nt, self.ntrial = self.spikes[0].shape[2], self.spikes[0].shape[0]
+        first_batch = next(iter(self.dataloader.train_loader))
+        self.narea = len(first_batch["nneuron_list"])
+        self.npadding = self.dataloader.sessions[self.dataloader.sessions.keys()[0]].npadding
+        self.nt = first_batch["spike_trains"].shape[0]
         self.nt -= self.npadding
          
     def initialize_model(self, verbose=False):
-        spline_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 
+        stimulus_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 
                                            num=self.params['num_B_spline_basis'], 
                                            add_constant_basis=True)
-        spline_basis = torch.tensor(spline_basis).float().to(self.device)
+        stimulus_basis = torch.tensor(stimulus_basis).float().to(self.device)
         
         coupling_basis = GLM.make_pillow_basis(**{'peaks_max':self.params['coupling_basis_peaks_max'], 
                                                   'num':self.params['coupling_basis_num'], 
@@ -47,23 +47,23 @@ class Trainer:
         K = torch.tensor(get_K(nt=self.nt, L=self.params['K_tau'], sigma2=self.params['K_sigma2'])).to(self.device)
 
         self.model = VAETransformer_FCGPFA(
-            num_layers=self.params['num_layers'], 
-            d_model=self.params['d_model'],
-            dim_feedforward=self.params['dim_feedforward'], 
-            nl_dim=self.params['nl_dim'], 
-            spline_basis=spline_basis, 
-            nfactor=self.params['nfactor'], 
-            nneuron_list=self.nneuron_list,
-            dropout=self.params['dropout'], 
-            nhead=self.params['nhead'],
-            decoder_architecture=self.params['decoder_architecture'],
+            transformer_num_layers=self.params['transformer_num_layers'],
+            transformer_d_model=self.params['transformer_d_model'],
+            transformer_dim_feedforward=self.params['transformer_dim_feedforward'],
+            transformer_vae_output_dim=self.params['transformer_vae_output_dim'],
+            stimulus_basis=stimulus_basis,
+            stimulus_nfactor=self.params['stimulus_nfactor'],
+            transformer_dropout=self.params['transformer_dropout'],
+            transformer_nhead=self.params['transformer_nhead'],
+            stimulus_decoder_inter_dim_factor=self.params['stimulus_decoder_inter_dim_factor'],
+            narea=self.narea,
             npadding=self.npadding, 
-            nsubspace=self.params['nsubspace'], 
-            K=K, 
-            nlatent=self.params['nlatent'], 
+            coupling_nsubspace=self.params['coupling_nsubspace'],
             coupling_basis=coupling_basis,
             use_self_coupling=self.params['use_self_coupling'],
-            ).to(self.device)
+            coupling_strength_nlatent=self.params['coupling_strength_nlatent'],
+            coupling_strength_cov_kernel=K,           
+        ).to(self.device)
         ################################
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
         
