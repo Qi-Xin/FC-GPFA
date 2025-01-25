@@ -30,7 +30,9 @@ class Trainer:
         ### Get some dependent parameters
         first_batch = next(iter(self.dataloader.train_loader))
         self.narea = len(first_batch["nneuron_list"])
-        self.npadding = self.dataloader.sessions[self.dataloader.sessions.keys()[0]].npadding
+        self.npadding = self.dataloader.sessions[
+            next(iter(self.dataloader.sessions.keys()))
+        ].npadding
         self.nt = first_batch["spike_trains"].shape[0]
         self.nt -= self.npadding
          
@@ -99,10 +101,24 @@ class Trainer:
         if verbose:
             print(f"Model initialized. Training on {self.device}")
 
-    def train(self, verbose=True, record_results=False, 
-              fix_latents=False, fix_stmulus=False,
-              only_coupling=False, only_stimulus=False):
-        assert not (only_coupling and only_stimulus), 'Cannot have both only_coupling and only_stimulus'
+    def process_batch(self, batch):
+        batch["spike_trains"].to(self.device)
+        batch["low_res_spike_trains"] = utils.change_temporal_resolution_single(
+            batch["spike_trains"][self.npadding:,:,:], 
+            self.params['downsample_factor']
+        )
+        batch["low_res_spike_trains"].to(self.device)
+    
+    def train(
+            self,
+            verbose=True,
+            record_results=False,
+            fix_stimulus=False,
+            fix_latents=False, 
+            include_stimulus=True,
+            include_coupling=True, 
+        ):
+
         if verbose:
             print(f"Start training model with parameters: {self.params}")
         utils.set_seed(0)
@@ -114,12 +130,16 @@ class Trainer:
         
         # Function to adjust learning rate
         def adjust_lr(optimizer, epoch):
-            optimizer.param_groups[0]['lr'] = \
-                self.params['lr_transformer']*(epoch+1)/self.params['epoch_warm_up']
-            optimizer.param_groups[1]['lr'] = \
-                self.params['lr_sti']*(epoch+1)/self.params['epoch_warm_up']
-            optimizer.param_groups[1]['lr'] = \
-                self.params['lr_cp']*(epoch+1)/self.params['epoch_warm_up']
+            if len(optimizer.param_groups) == 1:
+                optimizer.param_groups[0]['lr'] = \
+                    self.params['lr']*(epoch+1)/self.params['epoch_warm_up']
+            else:
+                optimizer.param_groups[0]['lr'] = \
+                    self.params['lr_transformer']*(epoch+1)/self.params['epoch_warm_up']
+                optimizer.param_groups[1]['lr'] = \
+                    self.params['lr_sti']*(epoch+1)/self.params['epoch_warm_up']
+                optimizer.param_groups[1]['lr'] = \
+                    self.params['lr_cp']*(epoch+1)/self.params['epoch_warm_up']
         
         ### Training and Testing Loops
         for epoch in range(self.params['epoch_max']):
@@ -130,48 +150,48 @@ class Trainer:
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
             for batch in self.dataloader.train_loader:
-                batch["spike_trains"].to(self.device)
-                batch["low_res_spike_trains"] = utils.change_temporal_resolution_single(
-                    batch["spike_trains"], self.params['downsample_factor']
-                )
-                batch["low_res_spike_trains"].to(self.device)
-                spikes_full_batch = spikes_full_batch.to(self.device)
+                self.process_batch(batch)
                 self.optimizer.zero_grad()
-                firing_rate = self.model(spikes_full_low_res_batch, 
-                                        spikes_full_batch, 
-                                        fix_latents=fix_latents, 
-                                        fix_stimulus=fix_stmulus, 
-                                        only_coupling=only_coupling,
-                                        only_stimulus=only_stimulus)
-                loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
-                                                self.model.sti_mu, self.model.sti_logvar, 
+                firing_rate = self.model(
+                    batch,
+                    fix_stimulus=fix_stimulus,
+                    fix_latents=fix_latents,
+                    include_stimulus=include_stimulus,
+                    include_coupling=include_coupling
+                )
+                loss = self.model.loss_function(firing_rate, 
+                                                batch["spike_trains"][self.npadding:,:,:], 
+                                                self.model.sti_mu, 
+                                                self.model.sti_logvar, 
                                                 beta=self.params['beta'])
                 if self.penalty_overlapping is not None:
                     loss += self.penalty_overlapping * self.model.overlapping_scale
                 loss.backward()
                 self.optimizer.step()
-                train_loss += loss.item() * spikes_full_batch.size(0)
+                train_loss += loss.item() * batch["spike_trains"].size(2)
             train_loss /= len(self.train_loader.dataset)
 
             self.model.eval()
             self.model.sample_latent = False
             test_loss = 0.0
             with torch.no_grad():
-                for spikes_full_low_res_batch, spikes_full_batch in self.test_loader:
-                    spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
-                    spikes_full_batch = spikes_full_batch.to(self.device)
-                    firing_rate = self.model(spikes_full_low_res_batch, 
-                                                            spikes_full_batch,
-                                                            fix_latents=fix_latents,
-                                                            fix_stimulus=fix_stmulus,
-                                                            only_coupling=only_coupling,
-                                                            only_stimulus=only_stimulus)
-                    loss = self.model.loss_function(firing_rate, spikes_full_batch[:,:,self.npadding:], 
-                                                    self.model.sti_mu, self.model.sti_logvar, 
+                for batch in self.dataloader.val_loader:
+                    self.process_batch(batch)
+                    firing_rate = self.model(
+                        batch,
+                        fix_stimulus=fix_stimulus,
+                        fix_latents=fix_latents,
+                        include_stimulus=include_stimulus,
+                        include_coupling=include_coupling
+                    )
+                    loss = self.model.loss_function(firing_rate, 
+                                                    batch["spike_trains"][self.npadding:,:,:], 
+                                                    self.model.sti_mu, 
+                                                    self.model.sti_logvar, 
                                                     beta=self.params['beta'])
                     if self.penalty_overlapping is not None:
                         loss += self.penalty_overlapping * self.model.overlapping_scale
-                    test_loss += loss.item() * spikes_full_batch.size(0)
+                    test_loss += loss.item() * batch["spike_trains"].size(2)
             test_loss /= len(self.test_loader.dataset)
             
             # if epoch % 5 == 2:
@@ -201,34 +221,42 @@ class Trainer:
             self.log_results(best_train_loss, best_test_loss)
         return best_test_loss
 
-    def predict(self, return_torch=True, dataset='all',
-                fix_latents=False, fix_stmulus=False,
-                only_coupling=False, only_stimulus=False):
+    def predict(
+            self, 
+            dataset='test',
+            batch_indices=[0,1,2,3,4],
+            return_torch=True, 
+            fix_stimulus=False,
+            fix_latents=False, 
+            include_stimulus=True,
+            include_coupling=True, 
+        ):
         self.model.eval()
         self.model.sample_latent = False
         sti_mu_list = []
         sti_logvar_list = []
         firing_rate_list = []
-        if dataset == 'all':
-            all_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res, self.spikes_full)
-            all_loader = torch.utils.data.DataLoader(all_dataset, batch_size=self.spikes_full.shape[0], shuffle=False)
-        elif dataset == 'train':
-            all_loader = self.train_loader
+        if dataset == 'train':
+            loader = self.dataloader.train_loader
         elif dataset == 'test':
-            all_loader = self.test_loader
+            loader = self.dataloader.test_loader
+        elif dataset == 'val':
+            loader = self.dataloader.val_loader
         else:
-            raise ValueError("Invalid dataset. Choose from 'all', 'train', or 'test'.")
+            raise ValueError("Invalid dataset. Choose from 'val', 'train', or 'test'.")
         
         with torch.no_grad():
-            for spikes_full_low_res_batch, spikes_full_batch in all_loader:
-                spikes_full_low_res_batch = spikes_full_low_res_batch.to(self.device)
-                spikes_full_batch = spikes_full_batch.to(self.device)
-                firing_rate = self.model(spikes_full_low_res_batch, 
-                                                            spikes_full_batch, 
-                                                            fix_latents=fix_latents,
-                                                            fix_stimulus=fix_stmulus,
-                                                            only_coupling=only_coupling,
-                                                            only_stimulus=only_stimulus)
+            for batch_idx in batch_indices:
+                batch = loader.get_batch(batch_idx, dataset)
+                self.process_batch(batch)
+                firing_rate = self.model(
+                    batch,
+                    fix_stimulus=fix_stimulus,
+                    fix_latents=fix_latents,
+                    include_stimulus=include_stimulus,
+                    include_coupling=include_coupling
+                )
+
                 sti_mu_list.append(self.model.sti_mu)
                 sti_logvar_list.append(torch.exp(0.5 * self.model.sti_logvar))
                 firing_rate_list.append(firing_rate)

@@ -103,31 +103,31 @@ class VAETransformer_FCGPFA(nn.Module):
         self.coupling_basis = coupling_basis
         
         # Do gradient descent on these parameters
-        self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.coupling_strength_nlatent) * 2 - 1))
-        self.cp_time_varying_coef_offset = nn.Parameter(1.0 * (torch.ones(self.narea, self.narea, 1, 1)))
+        # self.cp_latents_readout = nn.Parameter(0.2 * (torch.randn(self.narea, self.narea, self.coupling_strength_nlatent) * 2 - 1))
+        # self.cp_time_varying_coef_offset = nn.Parameter(1.0 * (torch.ones(self.narea, self.narea, 1, 1)))
         
-        self.cp_beta_coupling = nn.ModuleList([
-            nn.ParameterList([
-                    nn.Parameter(1.0*(torch.ones(coupling_basis.shape[1], self.coupling_nsubspace)+\
-                        0.1*torch.randn(coupling_basis.shape[1], self.coupling_nsubspace)))
-                for jarea in range(self.narea)])
-            for iarea in range(self.narea)])
+        # self.cp_beta_coupling = nn.ModuleList([
+        #     nn.ParameterList([
+        #             nn.Parameter(1.0*(torch.ones(coupling_basis.shape[1], self.coupling_nsubspace)+\
+        #                 0.1*torch.randn(coupling_basis.shape[1], self.coupling_nsubspace)))
+        #         for jarea in range(self.narea)])
+        #     for iarea in range(self.narea)])
         
-        self.cp_weight_sending = nn.ModuleList([
-            nn.ParameterList([
-                    nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.coupling_nsubspace)*\
-                        (torch.ones(self.nneuron_list[iarea], self.coupling_nsubspace)+\
-                            0.1*torch.randn(self.nneuron_list[iarea], self.coupling_nsubspace)))
-                for jarea in range(self.narea)])
-            for iarea in range(self.narea)])
+        # self.cp_weight_sending = nn.ModuleList([
+        #     nn.ParameterList([
+        #             nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.coupling_nsubspace)*\
+        #                 (torch.ones(self.nneuron_list[iarea], self.coupling_nsubspace)+\
+        #                     0.1*torch.randn(self.nneuron_list[iarea], self.coupling_nsubspace)))
+        #         for jarea in range(self.narea)])
+        #     for iarea in range(self.narea)])
         
-        self.cp_weight_receiving = nn.ModuleList([
-            nn.ParameterList([
-                    nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.coupling_nsubspace)*\
-                        (torch.ones(self.nneuron_list[jarea], self.coupling_nsubspace)+\
-                            0.1*torch.randn(self.nneuron_list[jarea], self.coupling_nsubspace)))
-                for jarea in range(self.narea)])
-            for iarea in range(self.narea)])
+        # self.cp_weight_receiving = nn.ModuleList([
+        #     nn.ParameterList([
+        #             nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.coupling_nsubspace)*\
+        #                 (torch.ones(self.nneuron_list[jarea], self.coupling_nsubspace)+\
+        #                     0.1*torch.randn(self.nneuron_list[jarea], self.coupling_nsubspace)))
+        #         for jarea in range(self.narea)])
+        #     for iarea in range(self.narea)])
 
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         device = self.cp_latents_readout.device
@@ -221,10 +221,10 @@ class VAETransformer_FCGPFA(nn.Module):
 
     def forward(self, 
                 src,
-                fix_latents=False, 
                 fix_stimulus=False,
-                include_coupling=True, 
+                fix_latents=False, 
                 include_stimulus=True,
+                include_coupling=True, 
         ):
         assert include_coupling or include_stimulus, 'Need to have either coupling or stimulus'
 

@@ -129,10 +129,6 @@ class Allen_dataloader_multi_session():
         # Split data into train/val/test
         self._split_data()
         
-        # # Initialize iterators
-        # self.current_session = None
-        self.current_batch_idx = 0
-        
         # Initialize BatchIterators
         self.train_loader = BatchIterator(self, split='train')
         self.val_loader = BatchIterator(self, split='val')
@@ -211,6 +207,7 @@ class Allen_dataloader_multi_session():
         local_idx = batch_indices - session_idx_start
         current_session = self.sessions[session_id]
         batch_data = current_session.get_trial_spike_trains(selected_trials=local_idx)
+        batch_data['spike_trains'] = torch.tensor(batch_data['spike_trains']).float()
         batch_data['session_id'] = session_id
         batch_data['nneuron_list'] = current_session.nneuron_list
         
@@ -234,6 +231,24 @@ class Allen_dataloader_multi_session():
         batch = self._load_batch(batches[current_batch_idx], 
                                  include_behavior=include_behavior)
         return batch
+    
+    def change_batch_size(self, new_batch_size, verbose=True):
+        self.batch_size = new_batch_size
+
+        # Split data into train/val/test
+        self._split_data()
+
+        # Initialize BatchIterators
+        self.train_loader = BatchIterator(self, split='train')
+        self.val_loader = BatchIterator(self, split='val')
+        self.test_loader = BatchIterator(self, split='test')
+        
+        if verbose:
+            print(f"Total sessions: {len(self.session_ids)}, "
+                f"Batch size: {self.batch_size}, "
+                f"Train set size: {len(self.train_loader)}, "
+                f"Val set size: {len(self.val_loader)}, "
+                f"Test set size: {len(self.test_loader)}")
 
 
 def combine_stimulus_presentations(stimulus_presentations, time_window=0.49):
