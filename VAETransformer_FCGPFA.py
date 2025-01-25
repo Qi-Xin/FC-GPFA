@@ -238,10 +238,10 @@ class VAETransformer_FCGPFA(nn.Module):
             self.token_converter_dict[session_id] = nn.Linear(
                 self.num_neurons_dict[session_id], 
                 self.transformer_d_model
-            )
+            ).to(src['low_res_spike_trains'].device)
             self.sti_readout_matrices_dict[session_id] = nn.ModuleList([
                 nn.Linear(self.stimulus_nfactor, nneurons) for nneurons in self.nneuron_list_dict[session_id]
-            ])
+            ]).to(src['low_res_spike_trains'].device)
         self.current_session_id = session_id
 
         low_res_spike_trains = src['low_res_spike_trains']
@@ -272,14 +272,12 @@ class VAETransformer_FCGPFA(nn.Module):
         ### Return the combined firing rates
         if include_coupling and (not include_stimulus):
             self.firing_rates_combined = -5 + self.firing_rates_coupling
-            return self.firing_rates_combined
         elif include_stimulus and (not include_coupling):
             self.firing_rates_combined = -5 + self.firing_rates_stimulus
-            return self.firing_rates_combined
         else:
             self.firing_rates_combined = -5 + self.firing_rates_stimulus + self.firing_rates_coupling
             self.overlapping_scale = (self.firing_rates_stimulus - self.firing_rates_coupling).abs().mean()
-            return self.firing_rates_combined
+        return self.firing_rates_combined.permute(2,1,0)
     
     def encode(self, src):
         # src: tnm
@@ -348,10 +346,10 @@ class VAETransformer_FCGPFA(nn.Module):
     def loss_function(self, recon_x, x, mu, sti_logvar, beta=0.2):
         # Poisson loss
         poisson_loss = (torch.exp(recon_x) - x * recon_x).mean()
-        
+
         # KL divergence
         kl_div = torch.mean(-0.5 * (1 + sti_logvar - mu.pow(2) - sti_logvar.exp()))
-        kl_div *= self.transformer_vae_output_dim/(self.num_neurons*self.nt)
+        kl_div *= self.transformer_vae_output_dim/(recon_x.shape[0]*recon_x.shape[1])
         return poisson_loss + beta * kl_div
         # return poisson_loss
 
@@ -368,7 +366,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0)]
+        x = x + self.pe[:x.size(0)].to(x.device)
         return self.dropout(x)
     
 #%% Define decoder algorithm

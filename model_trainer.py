@@ -3,7 +3,7 @@ import torch.optim as optim
 import json
 import os
 import numpy as np
-
+from tqdm import tqdm
 from VAETransformer_FCGPFA import VAETransformer_FCGPFA, get_K
 import utility_functions as utils
 import GLM
@@ -26,6 +26,9 @@ class Trainer:
         self.optimizer = None
         self.results_file = "training_results.json"
         self.penalty_overlapping = self.params['penalty_overlapping']
+
+        ### Change batch size
+        self.dataloader.change_batch_size(self.params['batch_size'])
         
         ### Get some dependent parameters
         first_batch = next(iter(self.dataloader.train_loader))
@@ -102,12 +105,11 @@ class Trainer:
             print(f"Model initialized. Training on {self.device}")
 
     def process_batch(self, batch):
-        batch["spike_trains"].to(self.device)
+        batch["spike_trains"] = batch["spike_trains"].to(self.device)
         batch["low_res_spike_trains"] = utils.change_temporal_resolution_single(
             batch["spike_trains"][self.npadding:,:,:], 
             self.params['downsample_factor']
         )
-        batch["low_res_spike_trains"].to(self.device)
     
     def train(
             self,
@@ -149,7 +151,7 @@ class Trainer:
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
-            for batch in self.dataloader.train_loader:
+            for batch in tqdm(self.dataloader.train_loader):
                 self.process_batch(batch)
                 self.optimizer.zero_grad()
                 firing_rate = self.model(
@@ -169,13 +171,13 @@ class Trainer:
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item() * batch["spike_trains"].size(2)
-            train_loss /= len(self.train_loader.dataset)
+            train_loss /= len(self.dataloader.train_loader)
 
             self.model.eval()
             self.model.sample_latent = False
             test_loss = 0.0
             with torch.no_grad():
-                for batch in self.dataloader.val_loader:
+                for batch in tqdm(self.dataloader.val_loader):
                     self.process_batch(batch)
                     firing_rate = self.model(
                         batch,
@@ -192,7 +194,7 @@ class Trainer:
                     if self.penalty_overlapping is not None:
                         loss += self.penalty_overlapping * self.model.overlapping_scale
                     test_loss += loss.item() * batch["spike_trains"].size(2)
-            test_loss /= len(self.test_loader.dataset)
+            test_loss /= len(self.dataloader.test_loader)
             
             # if epoch % 5 == 2:
             #     plt.figure()
@@ -229,7 +231,7 @@ class Trainer:
             fix_stimulus=False,
             fix_latents=False, 
             include_stimulus=True,
-            include_coupling=True, 
+            include_coupling=False, 
         ):
         self.model.eval()
         self.model.sample_latent = False
@@ -256,16 +258,15 @@ class Trainer:
                     include_stimulus=include_stimulus,
                     include_coupling=include_coupling
                 )
-
                 sti_mu_list.append(self.model.sti_mu)
                 sti_logvar_list.append(torch.exp(0.5 * self.model.sti_logvar))
                 firing_rate_list.append(firing_rate)
         if return_torch:
-            return (torch.concat(firing_rate_list, dim=0).cpu(), 
+            return (torch.concat(firing_rate_list, dim=2).cpu(), 
                     torch.concat(sti_mu_list, dim=0).cpu(),
                     torch.concat(sti_logvar_list, dim=0).cpu())
         else:
-            return (torch.concat(firing_rate_list, dim=0).cpu().numpy(), 
+            return (torch.concat(firing_rate_list, dim=2).cpu().numpy(), 
                     torch.concat(sti_mu_list, dim=0).cpu().numpy(),
                     torch.concat(sti_logvar_list, dim=0).cpu().numpy())
         
