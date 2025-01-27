@@ -44,13 +44,16 @@ class Trainer:
         self.nt -= self.npadding
         self.session_id2nneuron_list = {}
         if hasattr(self.dataloader, 'sessions'):
-            for session_id in self.dataloader.sessions:
-                session_id = str(session_id)
-                self.session_id2nneuron_list[session_id] = self.dataloader.sessions[session_id].nneuron_list
+            for session_id in self.dataloader.session_ids:
+                self.session_id2nneuron_list[str(session_id)] = self.dataloader.sessions[session_id].nneuron_list
         else:
             self.session_id2nneuron_list['0'] = self.dataloader.nneuron_list
 
-    def make_optimizer(self):
+        # Initialize model
+        utils.set_seed(0)
+        self.initialize_model(verbose=True)
+
+    def make_optimizer(self, frozen_params=[]):
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
         ###############################
         transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
@@ -72,13 +75,22 @@ class Trainer:
             raise ValueError("Some parameters are not assigned to any group.")
         self.optimizer = optim.Adam([
             {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in transformer_group])], 
+                        if (
+                            any([key_word in n for key_word in transformer_group]) 
+                            and (not any(key_word in n for key_word in frozen_params))
+                        )], 
              'lr': transformer_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in sti_group])], 
+                        if (
+                            any([key_word in n for key_word in sti_group])
+                            and (not any(key_word in n for key_word in frozen_params))
+                        )], 
              'lr': sti_lr},
             {'params': [p for n, p in self.model.named_parameters() 
-                        if any([key_word in n for key_word in cp_group])], 
+                        if (
+                            any([key_word in n for key_word in cp_group])
+                            and (not any(key_word in n for key_word in frozen_params))
+                        )], 
              'lr': cp_lr},
         ], weight_decay=weight_decay)
         ###############################
@@ -114,7 +126,6 @@ class Trainer:
             coupling_strength_cov_kernel=K,
             session_id2nneuron_list=self.session_id2nneuron_list,
         ).to(self.device)
-
         self.make_optimizer()
 
         if verbose:
@@ -139,8 +150,6 @@ class Trainer:
 
         if verbose:
             print(f"Start training model with parameters: {self.params}")
-        utils.set_seed(0)
-        self.initialize_model(verbose=verbose)
         best_test_loss = float('inf')
         best_train_loss = float('inf')
         no_improve_epoch = 0
