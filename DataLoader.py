@@ -44,8 +44,7 @@ class BatchIterator:
 
 class Simple_dataloader_from_spikes():
     def __init__(self, 
-                 spikes, 
-                 num_merge=1, 
+                 spikes,  
                  npadding=0, 
                  train_ratio=0.7,
                  val_ratio=0.1,
@@ -54,55 +53,74 @@ class Simple_dataloader_from_spikes():
         """
         Input data is a list of 3D numpy array of shape (nt, nneuron, ntrial).
         It should be high resolution data with bin size of 1 ms or so. 
-        It will be merged to lower resolution data with bin size of num_merge times bigger. 
         """
         self.spikes = spikes
         self.npadding = npadding
-        self.num_merge = num_merge
         self.batch_size = batch_size
-        self.nt, self.nneuron, self.ntrial = self.spikes.shape
+        self.nt, _, self.ntrial = self.spikes[0].shape
+        self.nneuron_list = [spike.shape[1] for spike in self.spikes]
+        self.npadding = npadding
         
         # Get tokenized spike trains by merging time intervals
-        self.spikes_full_w_padding = np.concatenate(self.spikes, axis=1)
-        self.spikes_full_low_res = utils.change_temporal_resolution_single(
-            self.spikes_full_w_padding[:,:,self.npadding:], self.num_merge
-        )
-        # Change to tensor
-        self.spikes_full_w_padding = torch.tensor(self.spikes_full_w_padding).float()
-        self.spikes_full_low_res = torch.tensor(self.spikes_full_low_res).float()
+        self.spikes_full = np.concatenate(self.spikes, axis=1)
+
+        # Change from tnm to mtn 
+        self.spikes_full = torch.tensor(self.spikes_full).float()
         
         # Splitting data into train and test sets
         indices = list(range(self.ntrial))
         utils.set_seed(1)
         np.random.shuffle(indices)
         split1, split2 = int(train_ratio*self.ntrial), int((train_ratio+val_ratio)*self.ntrial)
-        self.train_idx = indices[:split1]
-        self.val_idx = indices[split1:split2]
-        self.test_idx = indices[split2:]
+        self.train_indices = indices[:split1]
+        self.val_indices = indices[split1:split2]
+        self.test_indices = indices[split2:]
+
+        # Create batches for each split
+        self._create_batches('train', self.train_indices)
+        self._create_batches('val', self.val_indices)
+        self._create_batches('test', self.test_indices)
+
+        # Initialize BatchIterators
+        self.train_loader = BatchIterator(self, split='train')
+        self.val_loader = BatchIterator(self, split='val')
+        self.test_loader = BatchIterator(self, split='test')
+
+        self.session_ids = ["0"]
+
+    def _create_batches(self, split, indices):
+        """Create batches for the given split"""
+        n_trials = len(indices)
+        n_batches = (n_trials + self.batch_size - 1) // self.batch_size
         
-        train_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.train_idx], 
-                                                    self.spikes_full[self.train_idx])
-        val_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.val_idx], 
-                                                    self.spikes_full[self.val_idx])
-        test_dataset = torch.utils.data.TensorDataset(self.spikes_full_low_res[self.test_idx], 
-                                                    self.spikes_full[self.test_idx])
-
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, 
-                                                        batch_size=self.batch_size, 
-                                                        shuffle=True)
-        self.val_loader = torch.utils.data.DataLoader(val_dataset,
-                                                        batch_size=self.batch_size, 
-                                                        shuffle=False)
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, 
-                                                        batch_size=self.batch_size, 
-                                                        shuffle=False)
-        if verbose:
-            print(f"Total trials: {self.ntrial}, "
-                f"Batch size: {self.batch_size}, "
-                f"Train set size: {len(train_dataset)}, "
-                f"Val set size: {len(val_dataset)}, "
-                f"Test set size: {len(test_dataset)}")
-
+        # Shuffle indices if training split
+        if split == 'train':
+            np.random.shuffle(indices)
+            
+        # Create batches
+        batches = []
+        for i in range(n_batches):
+            start_idx = i * self.batch_size
+            end_idx = min(start_idx + self.batch_size, n_trials)
+            batch_indices = indices[start_idx:end_idx]
+            batches.append(batch_indices)
+            
+        setattr(self, f'{split}_batches', batches)
+        
+    def get_batch(self, current_batch_idx, split):
+        """Get a batch of data for the given split and batch index"""
+        batch_indices = getattr(self, f'{split}_batches')[current_batch_idx]
+        return {
+            "spike_trains": self.spikes_full[:, :, batch_indices],
+            "session_id": "0",
+            "nneuron_list": self.nneuron_list
+        }
+    
+    def change_batch_size(self, new_batch_size, verbose=True):
+        self.batch_size = new_batch_size
+        self._create_batches('train', self.train_indices)
+        self._create_batches('val', self.val_indices)
+        self._create_batches('test', self.test_indices)
 
 
 class Allen_dataloader_multi_session():
@@ -208,7 +226,7 @@ class Allen_dataloader_multi_session():
         current_session = self.sessions[session_id]
         batch_data = current_session.get_trial_spike_trains(selected_trials=local_idx)
         batch_data['spike_trains'] = torch.tensor(batch_data['spike_trains']).float()
-        batch_data['session_id'] = session_id
+        batch_data['session_id'] = str(session_id)
         batch_data['nneuron_list'] = current_session.nneuron_list
         
         if include_behavior:

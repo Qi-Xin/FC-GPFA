@@ -28,16 +28,60 @@ class Trainer:
         self.penalty_overlapping = self.params['penalty_overlapping']
 
         ### Change batch size
-        self.dataloader.change_batch_size(self.params['batch_size'])
+        if hasattr(self.dataloader, 'change_batch_size'):
+            self.dataloader.change_batch_size(self.params['batch_size'])
         
         ### Get some dependent parameters
         first_batch = next(iter(self.dataloader.train_loader))
         self.narea = len(first_batch["nneuron_list"])
-        self.npadding = self.dataloader.sessions[
-            next(iter(self.dataloader.sessions.keys()))
-        ].npadding
+        try:
+            self.npadding = self.dataloader.sessions[
+                next(iter(self.dataloader.sessions.keys()))
+            ].npadding
+        except:
+            self.npadding = self.dataloader.npadding
         self.nt = first_batch["spike_trains"].shape[0]
         self.nt -= self.npadding
+        self.session_id2nneuron_list = {}
+        if hasattr(self.dataloader, 'sessions'):
+            for session_id in self.dataloader.sessions:
+                session_id = str(session_id)
+                self.session_id2nneuron_list[session_id] = self.dataloader.sessions[session_id].nneuron_list
+        else:
+            self.session_id2nneuron_list['0'] = self.dataloader.nneuron_list
+
+    def make_optimizer(self):
+        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
+        ###############################
+        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
+        sti_group = ['sti_readout', 'sti_decoder', 'sti_inhomo']
+        cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
+                    'cp_weight_sending', 'cp_weight_receiving']
+        
+        # Define different learning rates
+        transformer_lr = self.params['lr_transformer']
+        sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
+        cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
+        weight_decay = self.params['weight_decay']
+
+        # Configure optimizer with two parameter groups
+        params_not_assigned = [n for n, p in self.model.named_parameters()
+            if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
+        if len(params_not_assigned)!=0:
+            print(params_not_assigned)
+            raise ValueError("Some parameters are not assigned to any group.")
+        self.optimizer = optim.Adam([
+            {'params': [p for n, p in self.model.named_parameters() 
+                        if any([key_word in n for key_word in transformer_group])], 
+             'lr': transformer_lr},
+            {'params': [p for n, p in self.model.named_parameters() 
+                        if any([key_word in n for key_word in sti_group])], 
+             'lr': sti_lr},
+            {'params': [p for n, p in self.model.named_parameters() 
+                        if any([key_word in n for key_word in cp_group])], 
+             'lr': cp_lr},
+        ], weight_decay=weight_decay)
+        ###############################
          
     def initialize_model(self, verbose=False):
         stimulus_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 
@@ -67,40 +111,12 @@ class Trainer:
             coupling_basis=coupling_basis,
             use_self_coupling=self.params['use_self_coupling'],
             coupling_strength_nlatent=self.params['coupling_strength_nlatent'],
-            coupling_strength_cov_kernel=K,           
+            coupling_strength_cov_kernel=K,
+            session_id2nneuron_list=self.session_id2nneuron_list,
         ).to(self.device)
-        ################################
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
-        
-        # transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
-        # sti_group = ['sti_readout_matrices', 'sti_decoder', 'sti_inhomo']
-        # cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
-        #             'cp_weight_sending', 'cp_weight_receiving']
-        
-        # # Define different learning rates
-        # transformer_lr = self.params['lr_transformer']
-        # sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
-        # cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
-        # weight_decay = self.params['weight_decay']
 
-        # # Configure optimizer with two parameter groups
-        # params_not_assigned = [n for n, p in self.model.named_parameters()
-        #     if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
-        # if len(params_not_assigned)!=0:
-        #     print(params_not_assigned)
-        #     raise ValueError("Some parameters are not assigned to any group.")
-        # self.optimizer = optim.Adam([
-        #     {'params': [p for n, p in self.model.named_parameters() 
-        #                 if any([key_word in n for key_word in transformer_group])], 
-        #      'lr': transformer_lr},
-        #     {'params': [p for n, p in self.model.named_parameters() 
-        #                 if any([key_word in n for key_word in sti_group])], 
-        #      'lr': sti_lr},
-        #     {'params': [p for n, p in self.model.named_parameters() 
-        #                 if any([key_word in n for key_word in cp_group])], 
-        #      'lr': cp_lr},
-        # ], weight_decay=weight_decay)
-        ################################
+        self.make_optimizer()
+
         if verbose:
             print(f"Model initialized. Training on {self.device}")
 
@@ -115,10 +131,10 @@ class Trainer:
             self,
             verbose=True,
             record_results=False,
-            fix_stimulus=False,
-            fix_latents=False, 
             include_stimulus=True,
             include_coupling=True, 
+            fix_stimulus=False,
+            fix_latents=False, 
         ):
 
         if verbose:
@@ -151,50 +167,59 @@ class Trainer:
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
+            total_trial = 0
             for batch in tqdm(self.dataloader.train_loader):
                 self.process_batch(batch)
                 self.optimizer.zero_grad()
                 firing_rate = self.model(
                     batch,
+                    include_stimulus=include_stimulus,
+                    include_coupling=include_coupling,
                     fix_stimulus=fix_stimulus,
                     fix_latents=fix_latents,
-                    include_stimulus=include_stimulus,
-                    include_coupling=include_coupling
                 )
-                loss = self.model.loss_function(firing_rate, 
-                                                batch["spike_trains"][self.npadding:,:,:], 
-                                                self.model.sti_mu, 
-                                                self.model.sti_logvar, 
-                                                beta=self.params['beta'])
+                loss = self.model.loss_function(
+                    firing_rate, 
+                    batch["spike_trains"][self.npadding:,:,:], 
+                    self.model.sti_mu, 
+                    self.model.sti_logvar, 
+                    beta=self.params['beta']
+                )
                 if self.penalty_overlapping is not None:
                     loss += self.penalty_overlapping * self.model.overlapping_scale
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 train_loss += loss.item() * batch["spike_trains"].size(2)
-            train_loss /= len(self.dataloader.train_loader)
+                total_trial += batch["spike_trains"].size(2)
+            train_loss /= total_trial
 
             self.model.eval()
             self.model.sample_latent = False
             test_loss = 0.0
+            total_trial = 0
             with torch.no_grad():
                 for batch in tqdm(self.dataloader.val_loader):
                     self.process_batch(batch)
                     firing_rate = self.model(
                         batch,
+                        include_stimulus=include_stimulus,
+                        include_coupling=include_coupling,
                         fix_stimulus=fix_stimulus,
                         fix_latents=fix_latents,
-                        include_stimulus=include_stimulus,
-                        include_coupling=include_coupling
                     )
-                    loss = self.model.loss_function(firing_rate, 
-                                                    batch["spike_trains"][self.npadding:,:,:], 
-                                                    self.model.sti_mu, 
-                                                    self.model.sti_logvar, 
-                                                    beta=self.params['beta'])
+                    loss = self.model.loss_function(
+                        firing_rate, 
+                        batch["spike_trains"][self.npadding:,:,:], 
+                        self.model.sti_mu, 
+                        self.model.sti_logvar, 
+                        beta=self.params['beta']
+                    )
                     if self.penalty_overlapping is not None:
                         loss += self.penalty_overlapping * self.model.overlapping_scale
                     test_loss += loss.item() * batch["spike_trains"].size(2)
-            test_loss /= len(self.dataloader.test_loader)
+                    total_trial += batch["spike_trains"].size(2)
+            test_loss /= total_trial
             
             # if epoch % 5 == 2:
             #     plt.figure()
@@ -204,7 +229,7 @@ class Trainer:
                 print(f"Epoch {epoch+1}/{self.params['epoch_max']}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}")
             
             # Checkpointing and Early Stopping Logic
-            if test_loss < best_test_loss:
+            if test_loss < best_test_loss - self.params['tol']:
                 best_test_loss = test_loss
                 best_train_loss = train_loss
                 no_improve_epoch = 0
@@ -228,10 +253,10 @@ class Trainer:
             dataset='test',
             batch_indices=[0,1,2,3,4],
             return_torch=True, 
-            fix_stimulus=False,
-            fix_latents=False, 
             include_stimulus=True,
             include_coupling=False, 
+            fix_stimulus=False,
+            fix_latents=False, 
         ):
         self.model.eval()
         self.model.sample_latent = False
@@ -249,14 +274,14 @@ class Trainer:
         
         with torch.no_grad():
             for batch_idx in batch_indices:
-                batch = loader.get_batch(batch_idx, dataset)
+                batch = loader.dataloader.get_batch(batch_idx, dataset)
                 self.process_batch(batch)
                 firing_rate = self.model(
                     batch,
+                    include_stimulus=include_stimulus,
+                    include_coupling=include_coupling,
                     fix_stimulus=fix_stimulus,
                     fix_latents=fix_latents,
-                    include_stimulus=include_stimulus,
-                    include_coupling=include_coupling
                 )
                 sti_mu_list.append(self.model.sti_mu)
                 sti_logvar_list.append(torch.exp(0.5 * self.model.sti_logvar))
