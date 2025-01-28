@@ -239,19 +239,19 @@ class Trainer:
             
             # Checkpointing and Early Stopping Logic
             if test_loss < best_test_loss - self.params['tol']:
-                best_test_loss = test_loss
-                best_train_loss = train_loss
                 no_improve_epoch = 0
+                best_test_loss = test_loss
                 torch.save(self.model.state_dict(), temp_best_model_path)
             else:
                 no_improve_epoch += 1
                 if verbose:
                     print(f'No improvement in Test Loss for {no_improve_epoch} epoch(s).')
+                    print(f'Current Best Test Loss: {best_test_loss:.4f}')
                 if no_improve_epoch >= self.params['epoch_patience']:
                     if verbose:
                         print('Early stopping triggered.')
                     break
-        
+
         self.model.load_state_dict(torch.load(temp_best_model_path))
         if record_results:
             self.log_results(best_train_loss, best_test_loss)
