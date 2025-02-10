@@ -122,42 +122,9 @@ class VAETransformer_FCGPFA(nn.Module):
         self.mu = None
         self.hessian = None
         self.coupling_basis = coupling_basis
-        # More like cache
+        self.init_cp_params()
         self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
-        
-        self.init_cp_params()
-        
-        # Do gradient descent on these parameters
-        # self.cp_latents_readout = nn.Parameter(
-        #     0.2 * (torch.randn(self.narea, self.narea, self.coupling_strength_nlatent) * 2 - 1)
-        # )
-        # self.cp_time_varying_coef_offset = nn.Parameter(
-        #     1.0 * (torch.ones(self.narea, self.narea, 1, 1))
-        # )
-        
-        # self.cp_beta_coupling = nn.ModuleList([
-        #     nn.ParameterList([
-        #             nn.Parameter(1.0*(torch.ones(self.coupling_basis.shape[1], self.coupling_nsubspace)+\
-        #                 0.1*torch.randn((self.coupling_basis.shape[1], self.coupling_nsubspace))))
-        #         for jarea in range(self.narea)])
-        #     for iarea in range(self.narea)])
-        
-        # self.cp_weight_sending = nn.ModuleList([
-        #     nn.ParameterList([
-        #             nn.Parameter(1/np.sqrt(self.nneuron_list[iarea]*self.coupling_nsubspace)*\
-        #                 (torch.ones(self.nneuron_list[iarea], self.coupling_nsubspace)+\
-        #                     0.1*torch.randn(self.nneuron_list[iarea], self.coupling_nsubspace)))
-        #         for jarea in range(self.narea)])
-        #     for iarea in range(self.narea)])
-        
-        # self.cp_weight_receiving = nn.ModuleList([
-        #     nn.ParameterList([
-        #             nn.Parameter(1/np.sqrt(self.nneuron_list[jarea]*self.coupling_nsubspace)*\
-        #                 (torch.ones(self.nneuron_list[jarea], self.coupling_nsubspace)+\
-        #                     0.1*torch.randn(self.nneuron_list[jarea], self.coupling_nsubspace)))
-        #         for jarea in range(self.narea)])
-        #     for iarea in range(self.narea)])
 
     def init_cp_params(self):
         # self.cp_latents_readout = nn.Parameter(
