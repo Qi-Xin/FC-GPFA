@@ -495,7 +495,9 @@ class PP_GLM():
         
         self.predictors = np.hstack(self.effect_list)
         if method=='mine':
-            self.results = poisson_regression(self.response, self.predictors, L2_pen=penalty, no_penalty=self.no_penalty, 
+            self.results = poisson_regression(self.response, self.predictors, 
+                                              nt=self.nt,
+                                              L2_pen=penalty, no_penalty=self.no_penalty, 
                                               no_penalty_term_penalty=no_penalty_term_penalty, smoothing=smoothing, offset=offset)
         elif method=='additional':
             self.results, self.a, self.intecept = poisson_regression_additional(self.response, self.predictors, L2_pen=penalty, no_penalty=self.no_penalty, 
@@ -1517,6 +1519,7 @@ class poisson_regression_result():
 def poisson_regression(
         Y,
         X,
+        nt=350,
         L2_pen=1e-6,
         max_num_iterations=100, 
         tol=1e-8,
@@ -1547,7 +1550,7 @@ def poisson_regression(
         penalty_vec[no_penalty_term] = no_penalty_term_penalty
     penalty_matrix = np.diag(penalty_vec.squeeze())
     ### Second order difference matrix
-    X_average = X.reshape(-1, 350, num_predictor).mean(axis=0)
+    X_average = X.reshape(-1, nt, num_predictor).mean(axis=0)
     # X_average = X[:500,:]
     D = np.diag(np.ones(X_average.shape[0]-1), k=-1) + np.diag(-2*np.ones(X_average.shape[0]), k=0) \
         + np.diag(np.ones(X_average.shape[0]-1), k=1)
@@ -2474,13 +2477,12 @@ def getI_real_data(features, dt, nt, npadding, log_fr):
     features["I"] = stimulus
     features["I_pre"] = stimulus_pre
 
-def EIF_simulator(std1, corr1, std2, corr2, ntrial, conn, return_current=False):
+def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, return_current=False):
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
 
 #     ntrial = 100
-    nneuron = 20
     dt = 0.1
     ndt = int(1/dt)
     padding = 50
