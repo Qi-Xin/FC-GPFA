@@ -1945,14 +1945,18 @@ def get_excursion_statistic_from_dict(record, method='default', time_range=None,
     statistics_dict = {}
     for key, value in tqdm(record.items(), desc='Processing records'):
         if key[0]>=0 and key[1]>=0:
-            statistics_dict[key] = get_excursion_statistic_multi_trial(value, method=method, time_range=time_range, calibrate_threshold=calibrate_threshold)
+            statistics_dict[key] = get_excursion_statistic_multi_trial(
+                value, method=method, time_range=time_range, calibrate_threshold=calibrate_threshold
+            )
     return statistics_dict
 
 def get_excursion_statistic_multi_trial(null_functions, method='default', time_range=None, calibrate_threshold=2.58):
     statistics_list = []
     # print(len(value))
     for functions in null_functions:
-        statistics, ROI = get_excursion_statistic_single_trial(functions, method=method, time_range=time_range, calibrate_threshold=calibrate_threshold)
+        statistics, ROI = get_excursion_statistic_single_trial(
+            functions, method=method, time_range=time_range, calibrate_threshold=calibrate_threshold
+        )
         statistics_list.append(statistics)
     return statistics_list
 
@@ -2105,7 +2109,8 @@ def get_statistics_null_excursion(V1, membership, condition_ids, fix_peak_time):
         if fix_peak_time is None:
             model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty)
         else:
-            model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty, fix_shifts=fix_peak_time[i][select_trials])
+            model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty, 
+                                            fix_shifts=fix_peak_time[i][select_trials])
             
         filter_list = model.get_filter(ci=True)
         for j in range(len(model.basis_list)):
@@ -2127,7 +2132,8 @@ def get_statistics_null_excursion(V1, membership, condition_ids, fix_peak_time):
         if fix_peak_time is None:
             model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty)
         else:
-            model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty, fix_shifts=fix_peak_time[i][select_trials])
+            model.fit_time_warping_baseline(target_probe, verbose=False, max_iter=max_iter, penalty=penalty, 
+                                            fix_shifts=fix_peak_time[i][select_trials])
         
         filter_list = model.get_filter(ci=True)
         for j in range(len(model.basis_list)):
@@ -2477,66 +2483,85 @@ def getI_real_data(features, dt, nt, npadding, log_fr):
     features["I"] = stimulus
     features["I_pre"] = stimulus_pre
 
-def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, return_current=False):
+
+def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, use_two_modes=False, return_current=False):
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
 
-#     ntrial = 100
-    dt = 0.1
-    ndt = int(1/dt)
-    padding = 50
-    nt = (500)*ndt
-    padding = 50
-    npadding = padding*ndt
-    nt_tot = nt + npadding
+    use_two_modes = True
+    # ntrial = 100
+    # nneuron = 20
+    bin_size = 2 # final spikes_rcd bin size in ms
+    dt = 0.1 # ms
+    ndt = int(1/dt) # number of simulation time bins per ms
+    padding = 100 # ms
+    nt = (500)*ndt # total number of simulation time bins
+    npadding = padding*ndt # number of simulation time bins for padding
+    nt_tot = nt + npadding # total number of simulation time bins including padding
     noise_amp = 1.0
 
     J = np.zeros((nneuron, nneuron)) # From row i to column j
     nneuron_part = int(nneuron/2)
-    J[0:nneuron_part,nneuron_part:] = conn
-    J[0:nneuron_part,0:nneuron_part] = 0.0
-    J[nneuron_part:,nneuron_part:] = 0.0
+    # J[0:nneuron_part,nneuron_part:] = conn
+    J[0:nneuron_part,nneuron_part:] = (
+        np.random.lognormal(mean=np.log(conn), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+        if conn!=0 else 0.0
+    )
+    J[0:nneuron_part,0:nneuron_part] = (
+        np.random.lognormal(mean=np.log(0.005), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+    )
+    J[nneuron_part:,nneuron_part:] = (
+        np.random.lognormal(mean=np.log(0.005), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+    )
 
     baseline = 0.0
     bump_amp = 0.25
-    bump_wid = 10
-#     std1 = 10
-#     corr1 = 0.5
-#     std2 = 25
-#     corr2 = 0.9
-    bump_center_mean1 = [60, 65]
-    bump_center_cov1 = np.array([[std1**2, corr1*std1**2], [corr1*std1**2, std1**2]])
-#     bump_center_cov1 = np.array([[0, 0], [0, 0]])
-    bump_center_mean2 = [260, 265]
-    bump_center_cov2 = np.array([[std2**2, corr2*std2**2], [corr2*std2**2, std2**2]])
-#     bump_center_cov2 = np.array([[0, 0], [0, 0]])
-    bump_centers1 = np.random.multivariate_normal(bump_center_mean1, bump_center_cov1, size=ntrial)
-    bump_centers2 = np.random.multivariate_normal(bump_center_mean2, bump_center_cov2, size=ntrial)
+    if use_two_modes:
+        # First bump - two modes
+        bump_center_mean1a = [40, 45]  # First mode
+        bump_center_mean1b = [80, 85]  # Second mode
+        bump_center_cov1 = np.array([[std1**2, corr1*std1**2], [corr1*std1**2, std1**2]])
+        
+        # Second bump - two modes  
+        bump_center_mean2a = [240, 245]  # First mode
+        bump_center_mean2b = [280, 285]  # Second mode
+        bump_center_cov2 = np.array([[std2**2, corr2*std2**2], [corr2*std2**2, std2**2]])
+        
+        # Randomly select which mode to use for each trial
+        mode_selector = np.random.random(ntrial) < 0.5
+        
+        # Generate from appropriate mode for each trial
+        bump_centers1 = np.zeros((ntrial, 2))
+        bump_centers2 = np.zeros((ntrial, 2))
+        
+        bump_centers1[mode_selector] = np.random.multivariate_normal(
+            bump_center_mean1a, bump_center_cov1, size=np.sum(mode_selector)
+        )
+        bump_centers1[~mode_selector] = np.random.multivariate_normal(
+            bump_center_mean1b, bump_center_cov1, size=np.sum(~mode_selector)
+        )
+        
+        bump_centers2[mode_selector] = np.random.multivariate_normal(
+            bump_center_mean2a, bump_center_cov2, size=np.sum(mode_selector)
+        )
+        bump_centers2[~mode_selector] = np.random.multivariate_normal(
+            bump_center_mean2b, bump_center_cov2, size=np.sum(~mode_selector)
+        )
+    else:
+        bump_center_mean1 = [60, 65]
+        bump_center_cov1 = np.array([[std1**2, corr1*std1**2], [corr1*std1**2, std1**2]])
+        bump_center_mean2 = [260, 265]
+        bump_center_cov2 = np.array([[std2**2, corr2*std2**2], [corr2*std2**2, std2**2]])
+        bump_centers1 = np.random.multivariate_normal(bump_center_mean1, bump_center_cov1, size=ntrial)
+        bump_centers2 = np.random.multivariate_normal(bump_center_mean2, bump_center_cov2, size=ntrial)
+
+    # Apply bounds to both cases
     bump_centers1[bump_centers1>=130] = 130
     bump_centers1[bump_centers1<=10] = 10
     bump_centers2[bump_centers2>=330] = 330
     bump_centers2[bump_centers2<=170] = 170
-    
-#     source = {"baseline": baseline, 
-#               "bump_pre_center": [bump_center_mean1[0],bump_center_mean2[0]], 
-#               "bump_center": [np.nan,np.nan], 
-#               "bump_amp": [bump_amp,bump_amp], 
-#               "bump_wid": [bump_wid,bump_wid]}
-# #               "bump_amp": [0.15,0.25], 
-# #               "bump_wid": [20,10]}
-#     target = {"baseline": baseline, 
-#               "bump_pre_center": [bump_center_mean1[1],bump_center_mean2[1]], 
-#               "bump_center": [np.nan,np.nan], 
-#               "bump_amp": [bump_amp,bump_amp], 
-#               "bump_wid": [bump_wid,bump_wid]}
-# #               "bump_amp": [0.2,0.2], 
-# #               "bump_wid": [15,15]}
-#     source["bump_center"] = [bump_centers1[:, 0], bump_centers2[:, 0]]
-#     target["bump_center"] = [bump_centers1[:, 1], bump_centers2[:, 1]]
-#     getI(source, dt, nt, npadding, False)
-#     getI(target, dt, nt, npadding, False)
-    
+        
     source = {"bump_pre_center": [EIF_params["V1_pre_center_p1"],
                                   EIF_params["V1_pre_center_p2"]], 
               "bump_center": np.nan, 
@@ -2572,9 +2597,7 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, return_curren
     syn_time_line = np.arange(nsyn_func)
     syn_func = (np.exp(-syn_time_line*dt/tau_d)-np.exp(-syn_time_line*dt/tau_r))[:, np.newaxis]
     ntau_ref = tau_ref*ndt
-    V_rcd = np.zeros((nt_tot, nneuron, ntrial))
-    I_rcd = np.zeros((nt_tot+nsyn_func+1, nneuron, ntrial))
-    spikes_rcd = np.zeros((nt_tot, nneuron, ntrial))
+    spikes_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
 
     for itrial in range(ntrial):
         V = Vre*np.ones((nt_tot, nneuron))
@@ -2582,7 +2605,6 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, return_curren
         spikes = np.zeros((nt_tot, nneuron))
 
         for t in range(1, nt_tot):
-
             I_leak = -dt/tau*(V[t-1,:]-EL) + dt/tau*DltT*np.exp((V[t-1,:]-VT)/DltT)
             I_noise = np.random.normal(0, noise_amp**2, nneuron)
             dV = I_leak + I_noise + I_syn[t,:] + I_ext[t,:,itrial]
@@ -2594,17 +2616,17 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, return_curren
             in_ref = ((spikes[max(0,t-ntau_ref):(t+1),:].sum(axis=0))>0).astype(int)
             V[t,:] += in_ref*(Vre-V[t,:])
 
-        V_rcd[:,:,itrial] = V
-        I_rcd[:,:,itrial] = I_syn
-        spikes_rcd[:,:,itrial] = spikes
-
-    spikes_rcd = spikes_rcd.reshape((int(nt_tot/ndt),ndt,nneuron,ntrial), order='C').sum(axis=1)
+            # Sum spikes over ndt time bins and store directly in final array
+            if t % (ndt*bin_size) == 0:
+                time_idx = t // (ndt*bin_size)
+                spikes_rcd[time_idx,:,itrial] = spikes[t-ndt*bin_size+1:t+1,:].sum(axis=0)
     
 #     plt.plot(I_ext[:,0,:5])
     if return_current==False:
-        return spikes_rcd[padding:,:,:]
+        return spikes_rcd[:,:,:]
     else:
         return spikes_rcd[padding:,:,:], I_ext[npadding:,:,:]
+
 
     
 def get_p(std1, corr1, std2, corr2, ntrial, conn):

@@ -194,7 +194,8 @@ class Trainer:
                     self.model.sti_logvar, 
                     beta=self.params['beta']
                 )
-                if self.penalty_overlapping is not None:
+                if (self.penalty_overlapping is not None and 
+                    self.model.overlapping_scale is not None):
                     loss += self.penalty_overlapping * self.model.overlapping_scale
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -224,7 +225,8 @@ class Trainer:
                         self.model.sti_logvar, 
                         beta=self.params['beta']
                     )
-                    if self.penalty_overlapping is not None:
+                    if (self.penalty_overlapping is not None and 
+                        self.model.overlapping_scale is not None):
                         loss += self.penalty_overlapping * self.model.overlapping_scale
                     test_loss += loss.item() * batch["spike_trains"].size(2)
                     total_trial += batch["spike_trains"].size(2)

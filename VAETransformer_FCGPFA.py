@@ -125,6 +125,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.init_cp_params()
         self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
+        self.overlapping_scale = None
 
     def init_cp_params(self):
         # self.cp_latents_readout = nn.Parameter(
@@ -159,7 +160,7 @@ class VAETransformer_FCGPFA(nn.Module):
             str(session_id): nn.ModuleList([
                 nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list_dict[session_id][jarea]*self.coupling_nsubspace)*\
-                        (torch.ones(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)+\
+                        (torch.zeros(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)+\
                             0.1*torch.randn(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)))
                     for jarea in range(self.narea)])
                 for iarea in range(self.narea)])
@@ -339,9 +340,16 @@ class VAETransformer_FCGPFA(nn.Module):
             self.firing_rates_combined = (
                 -0 + self.firing_rates_stimulus + self.firing_rates_coupling
             )
-            self.overlapping_scale = (
-                self.firing_rates_stimulus - self.firing_rates_coupling
-            ).abs().mean()
+            # Calculate temporal correlation between stimulus and coupling firing rates
+            # Center the data by subtracting means along time dimension
+            stim_centered = self.firing_rates_stimulus - self.firing_rates_stimulus.mean(dim=1, keepdim=True) 
+            coup_centered = self.firing_rates_coupling - self.firing_rates_coupling.mean(dim=1, keepdim=True)
+            
+            # Calculate correlation coefficient with small epsilon for numerical stability
+            eps = 1e-8
+            numerator = (stim_centered * coup_centered).sum(dim=1)
+            denominator = torch.sqrt((stim_centered**2).sum(dim=1) * (coup_centered**2).sum(dim=1) + eps)
+            self.overlapping_scale = (numerator / denominator).abs().mean()
         return self.firing_rates_combined.permute(2,1,0)
     
     def encode(self, src):
