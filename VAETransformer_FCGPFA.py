@@ -340,15 +340,14 @@ class VAETransformer_FCGPFA(nn.Module):
             self.firing_rates_combined = (
                 -0 + self.firing_rates_stimulus + self.firing_rates_coupling
             )
+
             # Calculate temporal correlation between stimulus and coupling firing rates
             # Center the data by subtracting means along time dimension
-            stim_centered = self.firing_rates_stimulus - self.firing_rates_stimulus.mean(dim=1, keepdim=True) 
-            coup_centered = self.firing_rates_coupling - self.firing_rates_coupling.mean(dim=1, keepdim=True)
-            
-            # Calculate correlation coefficient with small epsilon for numerical stability
-            eps = 1e-8
-            numerator = (stim_centered * coup_centered).sum(dim=1)
-            denominator = torch.sqrt((stim_centered**2).sum(dim=1) * (coup_centered**2).sum(dim=1) + eps)
+            stim_centered = self.firing_rates_stimulus - self.firing_rates_stimulus.mean(dim=2, keepdim=True) 
+            coup_centered = self.firing_rates_coupling - self.firing_rates_coupling.mean(dim=2, keepdim=True)
+            eps = 1e-3
+            numerator = (stim_centered * coup_centered).mean(dim=2)
+            denominator = torch.sqrt((stim_centered**2).mean(dim=2) * (coup_centered**2).mean(dim=2) + eps)
             self.overlapping_scale = (numerator / denominator).abs().mean()
         return self.firing_rates_combined.permute(2,1,0)
     
