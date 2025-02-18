@@ -345,7 +345,7 @@ class VAETransformer_FCGPFA(nn.Module):
             # Center the data by subtracting means along time dimension
             stim_centered = self.firing_rates_stimulus - self.firing_rates_stimulus.mean(dim=2, keepdim=True) 
             coup_centered = self.firing_rates_coupling - self.firing_rates_coupling.mean(dim=2, keepdim=True)
-            eps = 1e-3
+            eps = 1e-5
             numerator = (stim_centered * coup_centered).mean(dim=2)
             denominator = torch.sqrt((stim_centered**2).mean(dim=2) * (coup_centered**2).mean(dim=2) + eps)
             self.overlapping_scale = (numerator / denominator).abs().mean()
