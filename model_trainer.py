@@ -56,7 +56,7 @@ class Trainer:
     def make_optimizer(self, frozen_params=[]):
         # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
         ###############################
-        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter']
+        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter', 'cls_token']
         sti_group = ['sti_readout', 'sti_decoder', 'sti_inhomo']
         cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
                     'cp_weight_sending', 'cp_weight_receiving']

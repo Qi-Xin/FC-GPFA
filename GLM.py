@@ -2599,7 +2599,7 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, use_two_modes
     ntau_ref = tau_ref*ndt
     spikes_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
 
-    for itrial in range(ntrial):
+    for itrial in tqdm(range(ntrial)):
         V = Vre*np.ones((nt_tot, nneuron))
         I_syn = np.zeros((nt_tot+nsyn_func+1, nneuron))
         spikes = np.zeros((nt_tot, nneuron))
