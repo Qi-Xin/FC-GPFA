@@ -2484,7 +2484,10 @@ def getI_real_data(features, dt, nt, npadding, log_fr):
     features["I_pre"] = stimulus_pre
 
 
-def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, use_two_modes=False, return_current=False):
+def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, 
+                  use_two_modes=False, 
+                  return_current=False,
+                  return_trial_type=False):
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
@@ -2622,10 +2625,12 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, use_two_modes
                 spikes_rcd[time_idx,:,itrial] = spikes[t-ndt*bin_size+1:t+1,:].sum(axis=0)
     
 #     plt.plot(I_ext[:,0,:5])
-    if return_current==False:
-        return spikes_rcd[:,:,:]
-    else:
-        return spikes_rcd[padding:,:,:], I_ext[npadding:,:,:]
+    res = [spikes_rcd]
+    if return_trial_type:
+        res.append(mode_selector)
+    if return_current:
+        res.append(I_ext)
+    return res
 
 
     

@@ -263,17 +263,19 @@ class Trainer:
             self, 
             dataset='test',
             batch_indices=[0,1,2,3,4],
-            return_torch=True, 
             include_stimulus=True,
             include_coupling=False, 
             fix_stimulus=False,
-            fix_latents=False, 
+            fix_latents=False,
+            return_torch=True, 
+            return_trial_indices=True,
         ):
         self.model.eval()
         self.model.sample_latent = False
         sti_mu_list = []
         sti_logvar_list = []
         firing_rate_list = []
+        trial_indices_list = []
         if dataset == 'train':
             loader = self.dataloader.train_loader
         elif dataset == 'test':
@@ -297,14 +299,16 @@ class Trainer:
                 sti_mu_list.append(self.model.sti_mu)
                 sti_logvar_list.append(torch.exp(0.5 * self.model.sti_logvar))
                 firing_rate_list.append(firing_rate)
-        if return_torch:
-            return (torch.concat(firing_rate_list, dim=2).cpu(), 
-                    torch.concat(sti_mu_list, dim=0).cpu(),
-                    torch.concat(sti_logvar_list, dim=0).cpu())
-        else:
-            return (torch.concat(firing_rate_list, dim=2).cpu().numpy(), 
-                    torch.concat(sti_mu_list, dim=0).cpu().numpy(),
-                    torch.concat(sti_logvar_list, dim=0).cpu().numpy())
+                if return_trial_indices and 'batch_indices' in batch:
+                    trial_indices_list.append(batch['batch_indices'])
+        outputs = [torch.concat(firing_rate_list, dim=2).cpu(),
+                  torch.concat(sti_mu_list, dim=0).cpu(), 
+                  torch.concat(sti_logvar_list, dim=0).cpu()]
+        if not return_torch:
+            outputs = [x.numpy() for x in outputs]
+        if return_trial_indices:
+            outputs.append(np.concatenate(trial_indices_list, axis=0))
+        return outputs
         
     def save_model_and_hp(self):
         filename = self.path + '/best_model_and_hp.pth'

@@ -113,7 +113,8 @@ class Simple_dataloader_from_spikes():
         return {
             "spike_trains": self.spikes_full[:, :, batch_indices],
             "session_id": "0",
-            "nneuron_list": self.nneuron_list
+            "nneuron_list": self.nneuron_list,
+            "batch_indices": batch_indices
         }
     
     def change_batch_size(self, new_batch_size, verbose=True):
