@@ -2522,13 +2522,13 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
     bump_amp = 0.25
     if use_two_modes:
         # First bump - two modes
-        bump_center_mean1a = [40, 45]  # First mode
-        bump_center_mean1b = [80, 85]  # Second mode
+        bump_center_mean1a = [40, 60]  # First mode
+        bump_center_mean1b = [60, 80]  # Second mode
         bump_center_cov1 = np.array([[std1**2, corr1*std1**2], [corr1*std1**2, std1**2]])
         
-        # Second bump - two modes  
-        bump_center_mean2a = [240, 245]  # First mode
-        bump_center_mean2b = [280, 285]  # Second mode
+        # Second bump - two modes
+        bump_center_mean2a = [220, 250]  # First mode
+        bump_center_mean2b = [250, 270]  # Second mode
         bump_center_cov2 = np.array([[std2**2, corr2*std2**2], [corr2*std2**2, std2**2]])
         
         # Randomly select which mode to use for each trial

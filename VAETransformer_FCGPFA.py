@@ -161,7 +161,7 @@ class VAETransformer_FCGPFA(nn.Module):
                 nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list_dict[session_id][jarea]*self.coupling_nsubspace)*\
                         (torch.zeros(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)+\
-                            0.1*torch.randn(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)))
+                            1.1*torch.randn(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)))
                     for jarea in range(self.narea)])
                 for iarea in range(self.narea)])
             for session_id in self.nneuron_list_dict.keys()
