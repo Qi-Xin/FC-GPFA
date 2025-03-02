@@ -2484,17 +2484,28 @@ def getI_real_data(features, dt, nt, npadding, log_fr):
     features["I_pre"] = stimulus_pre
 
 
-def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn, 
-                  use_two_modes=False, 
-                  return_current=False,
-                  return_trial_type=False):
+def EIF_simulator(
+        ntrial, 
+        nneuron, 
+        conn, 
+        params = {}, 
+        return_current=False,
+        return_trial_info=False
+    ):
+    
+    if params["external_input_type"] == "two_peaks_with_varying_timing":
+        std1, corr1, std2, corr2 = (
+            params["std1"], params["corr1"], params["std2"], params["corr2"]
+        )
+        use_two_modes = params["use_two_modes"]
+    elif params["external_input_type"] == "two_peaks_with_varying_baseline_slope":
+        max_slope, min_slope = params["max_slope"], params["min_slope"]
+    else:
+        raise ValueError(f"Invalid external input type: {params['external_input_type']}")
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
 
-    use_two_modes = True
-    # ntrial = 100
-    # nneuron = 20
     bin_size = 2 # final spikes_rcd bin size in ms
     dt = 0.1 # ms
     ndt = int(1/dt) # number of simulation time bins per ms
@@ -2518,6 +2529,10 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
         np.random.lognormal(mean=np.log(0.005), sigma=0.4, size=(nneuron_part, nneuron_part)) 
     )
 
+    if params["external_input_type"] == "two_peaks_with_varying_baseline_slope":
+        std1, corr1, std2, corr2 = (0, 0, 0, 0)
+        use_two_modes = False
+    
     baseline = 0.0
     bump_amp = 0.25
     if use_two_modes:
@@ -2551,6 +2566,7 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
         bump_centers2[~mode_selector] = np.random.multivariate_normal(
             bump_center_mean2b, bump_center_cov2, size=np.sum(~mode_selector)
         )
+        trial_info = mode_selector
     else:
         bump_center_mean1 = [60, 65]
         bump_center_cov1 = np.array([[std1**2, corr1*std1**2], [corr1*std1**2, std1**2]])
@@ -2566,15 +2582,15 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
     bump_centers2[bump_centers2<=170] = 170
         
     source = {"bump_pre_center": [EIF_params["V1_pre_center_p1"],
-                                  EIF_params["V1_pre_center_p2"]], 
-              "bump_center": np.nan, 
-              "baseline": baseline, 
-              "bump_amp": bump_amp }
+                                EIF_params["V1_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
     target = {"bump_pre_center": [EIF_params["LM_pre_center_p1"],
-                                  EIF_params["LM_pre_center_p2"]], 
-              "bump_center": np.nan, 
-              "baseline": baseline, 
-              "bump_amp": bump_amp }
+                                EIF_params["LM_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
     source["bump_center"] = [bump_centers1[:, 0], bump_centers2[:, 0]]
     target["bump_center"] = [bump_centers1[:, 1], bump_centers2[:, 1]]
     getI_real_data(source, dt, nt, npadding, EIF_params["V1_template"])
@@ -2583,7 +2599,13 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
     I_ext = 0.0*np.ones((nt_tot, nneuron, ntrial))
     I_ext[:,:nneuron_part,:] = np.repeat(source["I"][:,np.newaxis,:],nneuron_part, axis=1)
     I_ext[:,nneuron_part:,:] = np.repeat(target["I"][:,np.newaxis,:],nneuron_part, axis=1)
-#     I_ext += np.random.normal(0,10,I_ext.shape)
+
+    if params["external_input_type"] == "two_peaks_with_varying_baseline_slope":
+        slopes = np.random.uniform(min_slope, max_slope, (1, 1, ntrial))
+        t = np.arange(nt_tot)[:,np.newaxis,np.newaxis]
+        time_line = slopes * 1e-3 * (t - nt/2 - npadding)
+        I_ext += (time_line - time_line.min())  # Center around middle timepoint
+        trial_info = slopes.flatten()
 
     # Unit: mV or ms
     tau = 15
@@ -2626,8 +2648,8 @@ def EIF_simulator(std1, corr1, std2, corr2, ntrial, nneuron, conn,
     
 #     plt.plot(I_ext[:,0,:5])
     res = [spikes_rcd]
-    if return_trial_type:
-        res.append(mode_selector)
+    if return_trial_info:
+        res.append(trial_info)
     if return_current:
         res.append(I_ext)
     return res
