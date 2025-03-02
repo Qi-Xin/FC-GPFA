@@ -138,7 +138,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.cp_beta_coupling_dict = nn.ModuleDict({
             str(session_id): nn.ModuleList([
                 nn.ParameterList([
-                    nn.Parameter(1.0*(torch.ones((self.coupling_basis.shape[1], self.coupling_nsubspace))+\
+                    nn.Parameter(1.0*(torch.zeros((self.coupling_basis.shape[1], self.coupling_nsubspace))+\
                         0.1*torch.randn((self.coupling_basis.shape[1], self.coupling_nsubspace))))
                     for jarea in range(self.narea)])
                 for iarea in range(self.narea)])
@@ -149,7 +149,7 @@ class VAETransformer_FCGPFA(nn.Module):
             str(session_id): nn.ModuleList([
                 nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list_dict[session_id][iarea]*self.coupling_nsubspace)*\
-                        (torch.ones(self.nneuron_list_dict[session_id][iarea], self.coupling_nsubspace)+\
+                        (torch.zeros(self.nneuron_list_dict[session_id][iarea], self.coupling_nsubspace)+\
                             0.1*torch.randn(self.nneuron_list_dict[session_id][iarea], self.coupling_nsubspace)))
                     for jarea in range(self.narea)])
                 for iarea in range(self.narea)])
@@ -161,7 +161,7 @@ class VAETransformer_FCGPFA(nn.Module):
                 nn.ParameterList([
                     nn.Parameter(1/np.sqrt(self.nneuron_list_dict[session_id][jarea]*self.coupling_nsubspace)*\
                         (torch.zeros(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)+\
-                            1.1*torch.randn(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)))
+                            0.1*torch.randn(self.nneuron_list_dict[session_id][jarea], self.coupling_nsubspace)))
                     for jarea in range(self.narea)])
                 for iarea in range(self.narea)])
             for session_id in self.nneuron_list_dict.keys()

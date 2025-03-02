@@ -50,7 +50,7 @@ class Trainer:
             self.session_id2nneuron_list['0'] = self.dataloader.nneuron_list
 
         # Initialize model
-        utils.set_seed(0)
+        utils.set_seed(1)
         self.initialize_model(verbose=True)
 
     def make_optimizer(self, frozen_params=[]):
