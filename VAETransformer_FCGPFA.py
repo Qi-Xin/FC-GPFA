@@ -214,7 +214,7 @@ class VAETransformer_FCGPFA(nn.Module):
         # coupling_basis, cp_beta_coupling -> coupling_filters
         self.coupling_filters_dict[current_session_id] = [
             [torch.einsum(
-                'tb,bs->ts',
+                'tb,bs->ts', 
                 self.coupling_basis, 
                 self.cp_beta_coupling_dict[current_session_id][iarea][jarea]
             ) for jarea in range(self.narea)]
@@ -224,7 +224,13 @@ class VAETransformer_FCGPFA(nn.Module):
         coupling_filters = self.coupling_filters_dict[current_session_id]
         cp_weight_sending = self.cp_weight_sending_dict[current_session_id]
         cp_weight_receiving = self.cp_weight_receiving_dict[current_session_id]
-        spike_trains = src["spike_trains"].permute(2,1,0)
+        
+        # Add check for spike_trains dimensions
+        spike_trains = src["spike_trains"]
+        if spike_trains.dim() == 3:
+            # Ensure dimensions are (batch, neurons, time)
+            if spike_trains.shape[0] < spike_trains.shape[2]:
+                spike_trains = spike_trains.transpose(2, 1, 0)
 
         for jarea in range(self.narea):
             for iarea in range(self.narea):
