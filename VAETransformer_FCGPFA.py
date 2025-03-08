@@ -263,25 +263,16 @@ class VAETransformer_FCGPFA(nn.Module):
                                                  device=src['spike_trains'].device)
         for jarea in range(self.narea):
             for iarea in range(self.narea):
-                if iarea == jarea:
-                    if self.use_self_coupling:
-                        # print(self.coupling_outputs[iarea][jarea].shape,
-                        #       self.firing_rates_coupling[:,accnneuron[jarea]:accnneuron[jarea+1],:].shape)
-                        self.firing_rates_coupling[:,accnneuron[jarea]:accnneuron[jarea+1],:] += \
-                            self.coupling_outputs[iarea][jarea]
-                    else:
-                        continue
-                if fix_latents:
-                    self.firing_rates_coupling[
-                        :,accnneuron[jarea]:accnneuron[jarea+1],:
-                    ] += self.coupling_outputs[iarea][jarea]
-                else:
-                    self.firing_rates_coupling[
-                        :,accnneuron[jarea]:accnneuron[jarea+1],:
-                    ] += ( 
-                        self.coupling_outputs[iarea][jarea] 
-                        * self.time_varying_coef[iarea, jarea, :, None, :]
-                    )
+                if iarea == jarea and not self.use_self_coupling:
+                    continue
+                    
+                coupling_output = self.coupling_outputs[iarea][jarea]
+                if not fix_latents and iarea != jarea:
+                    coupling_output = coupling_output * self.time_varying_coef[iarea, jarea, :, None, :]
+                    
+                self.firing_rates_coupling[
+                    :,accnneuron[jarea]:accnneuron[jarea+1],:
+                ] += coupling_output
         return None
 
     def get_ci(self, alpha=0.05):
