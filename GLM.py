@@ -2491,7 +2491,8 @@ def get_bump_centers(params, ntrial):
         std1, corr1, std2, corr2 = (0, 0, 0, 0)
         use_two_modes = False
     elif params["external_input_type"] in[
-        "two_peaks_with_varying_timing", "two_peaks_with_all_varying"
+        "two_peaks_with_varying_timing", "two_peaks_with_all_varying",
+        "two_peaks_with_varying_timing_baseline_slope"
         ]:
         std1, corr1, std2, corr2 = (
             params["std1"], params["corr1"], params["std2"], params["corr2"]
@@ -2558,19 +2559,6 @@ def EIF_simulator(
         return_current=False,
         return_trial_info=False
     ):
-    
-    if params["external_input_type"] == "two_peaks_with_varying_timing":
-        use_two_modes = params["use_two_modes"]
-    elif params["external_input_type"] == "two_peaks_with_varying_baseline_slope":
-        max_slope, min_slope = params["max_slope"], params["min_slope"]
-    elif params["external_input_type"] == "two_peaks_with_varying_gain":
-        max_gain, min_gain = params["max_gain"], params["min_gain"]
-    elif params["external_input_type"] == "two_peaks_with_all_varying":
-        gp_time_constant, gp_amplitude = (
-            params["gp_time_constant"], params["gp_amplitude"]
-        )
-    else:
-        raise ValueError(f"Invalid external input type: {params['external_input_type']}")
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
@@ -2624,24 +2612,29 @@ def EIF_simulator(
     I_ext[:,:nneuron_part,:] = np.repeat(source["I"][:,np.newaxis,:],nneuron_part, axis=1)
     I_ext[:,nneuron_part:,:] = np.repeat(target["I"][:,np.newaxis,:],nneuron_part, axis=1)
 
+    trial_info_slope, trial_info_gain = None, None
     ### Getting the external input after some background slope is added
-    if params["external_input_type"] == "two_peaks_with_varying_baseline_slope":
-        slopes = np.random.uniform(min_slope, max_slope, (1, 1, ntrial))
+    if params["external_input_type"] in [
+        "two_peaks_with_varying_slope", "two_peaks_with_varying_timing_baseline_slope"
+        ]:
+        slopes = np.random.uniform(params["min_slope"], params["max_slope"], (1, 1, ntrial))
         t = np.arange(nt_tot)[:,np.newaxis,np.newaxis]
         time_line = slopes * 1e-3 * (t - nt/2 - npadding)
         I_ext += (time_line - time_line.min())  # Center around middle timepoint
-        trial_info_baseline = slopes.flatten()
-    elif params["external_input_type"] == "two_peaks_with_varying_gain":
-        gains = np.random.uniform(min_gain, max_gain, (1, 1, ntrial))
+        trial_info_slope = slopes.flatten()
+    if params["external_input_type"] in [
+        "two_peaks_with_varying_gain", "two_peaks_with_varying_timing_baseline_slope"
+        ]:
+        gains = np.random.uniform(params["min_gain"], params["max_gain"], (1, 1, ntrial))
         I_ext += gains
-        trial_info_baseline = gains.flatten()
-    elif params["external_input_type"] == "two_peaks_with_all_varying":
+        trial_info_gain = gains.flatten()
+    if params["external_input_type"] == "two_peaks_with_all_varying":
         # Generate baseline variations using Gaussian Process
         t = np.arange(nt_tot)[:,np.newaxis,np.newaxis]
         
         # Generate GP baseline with RBF kernel
-        length_scale = gp_time_constant*ndt  # Controls smoothness of variations
-        amplitude = gp_amplitude  # Controls magnitude of variations
+        length_scale = params["gp_time_constant"]*ndt  # Controls smoothness of variations
+        amplitude = params["gp_amplitude"]  # Controls magnitude of variations
         
         # Generate independent GP for each trial using lower resolution and interpolation
         downsample_factor = 10  # Reduce resolution by this factor
@@ -2658,12 +2651,11 @@ def EIF_simulator(
             gp_baseline[:,:,i] = np.interp(t[:,0,0], t_low_res, gp_low_res)[:,np.newaxis]
         
         I_ext += gp_baseline
-        trial_info_baseline = gp_baseline.mean(axis=(0,1)).flatten()
-        # trial_info_baseline = gp_baseline
-    elif params["external_input_type"] == "two_peaks_with_varying_timing":
-        trial_info_baseline = None
-    else:
-        raise ValueError(f"Invalid external input type: {params['external_input_type']}")
+        trial_info_gain = gp_baseline.mean(axis=(0,1)).flatten()
+        trial_info_slope = (gp_baseline[-1,:,:] - gp_baseline[0,:,:]).flatten() / (nt_tot * dt)
+
+    if params["external_input_type"] == "two_peaks_with_varying_timing":
+        pass
 
     # Unit: mV or ms
     tau = 15
@@ -2704,10 +2696,9 @@ def EIF_simulator(
                 time_idx = t // (ndt*bin_size)
                 spikes_rcd[time_idx,:,itrial] = spikes[t-ndt*bin_size+1:t+1,:].sum(axis=0)
     
-#     plt.plot(I_ext[:,0,:5])
     res = [spikes_rcd]
     if return_trial_info:
-        res.append({"bump": trial_info_bump, "baseline": trial_info_baseline})
+        res.append({"bump": trial_info_bump, "gain": trial_info_gain, "slope": trial_info_slope})
     if return_current:
         res.append(I_ext)
     return res
