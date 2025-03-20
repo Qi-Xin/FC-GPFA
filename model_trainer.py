@@ -93,6 +93,7 @@ class Trainer:
                         )], 
              'lr': cp_lr},
         ], weight_decay=weight_decay)
+        
         ###############################
          
     def initialize_model(self, verbose=False):

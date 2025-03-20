@@ -415,6 +415,7 @@ class VAETransformer_FCGPFA(nn.Module):
         # KL divergence
         kl_div = torch.mean(-0.5 * (1 + sti_logvar - mu.pow(2) - sti_logvar.exp()))
         kl_div *= self.transformer_vae_output_dim/(recon_x.shape[0]*recon_x.shape[1])
+
         return poisson_loss + beta * kl_div
         # return poisson_loss
 
