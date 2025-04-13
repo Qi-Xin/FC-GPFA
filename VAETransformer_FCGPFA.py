@@ -29,6 +29,7 @@ class VAETransformer_FCGPFA(nn.Module):
             coupling_strength_nlatent: int, # Coupling's feature:
             coupling_strength_cov_kernel: float, # Coupling's parameters
             session_id2nneuron_list: dict, # all session id and corresponding nneuron_list
+            use_area_specific_decoder: bool,
         ):
         # Things that are specific to each session:
         # nneuron_list_dict, num_neurons_dict, accnneuron_dict
@@ -47,6 +48,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.narea = narea
         self.sample_latent = False  # This will be changed in "Trainer"
         self.num_neurons_dict = {}
+        self.use_area_specific_decoder = use_area_specific_decoder
         
         ### FCGPFA's additional settings
         self.nneuron_list_dict = {}
@@ -69,26 +71,24 @@ class VAETransformer_FCGPFA(nn.Module):
         self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=transformer_num_layers)
         self.to_latent = nn.Linear(self.transformer_d_model, 
                                    self.transformer_vae_output_dim * 2)  # Output mu and log-variance for each dimension
-        
-        if self.stimulus_decoder_inter_dim_factor == 0:
-            self.sti_decoder = nn.Linear(self.transformer_vae_output_dim, 
-                                         self.stimulus_nbasis * self.narea * self.stimulus_nfactor)
-            torch.nn.init.kaiming_uniform_(self.sti_decoder.weight, mode='fan_in', nonlinearity='relu')
-        else:
-            # Enhanced sti_decoder with additional layers and non-linearities
-            self.sti_decoder = nn.Sequential(
-                nn.Linear(self.transformer_vae_output_dim, 
-                          self.transformer_vae_output_dim * self.stimulus_decoder_inter_dim_factor),
-                nn.ReLU(), # Non-linear activation
-                # Final output to match required dimensions
-                nn.Linear(self.transformer_vae_output_dim * self.stimulus_decoder_inter_dim_factor, 
-                          self.stimulus_nbasis * self.narea * self.stimulus_nfactor)  
+
+        # Initialize the stimulus decoder
+        if use_area_specific_decoder:
+            self.sti_decoder = area_specific_sti_decoder(
+                self.transformer_vae_output_dim, 
+                self.stimulus_decoder_inter_dim_factor, 
+                self.stimulus_nbasis, 
+                self.narea, 
+                self.stimulus_nfactor,
             )
-            torch.nn.init.kaiming_uniform_(self.sti_decoder[0].weight, mode='fan_in', nonlinearity='relu')
-            torch.nn.init.kaiming_uniform_(self.sti_decoder[2].weight, mode='fan_in', nonlinearity='relu')
-            self.sti_decoder[2].weight.data *= 1e-3
-            if self.sti_decoder[2].bias is not None:
-                nn.init.constant_(self.sti_decoder[2].bias, 0.0)
+        else:
+            self.sti_decoder = get_naive_sti_decoder(
+                self.transformer_vae_output_dim, 
+                self.stimulus_decoder_inter_dim_factor, 
+                self.stimulus_nbasis, 
+                self.narea, 
+                self.stimulus_nfactor,
+            )
             
         self.stimulus_basis = stimulus_basis  # Assume stimulus_basis is of size (nt, number of basis)
         self.sti_readout_matrix_dict = nn.ModuleDict()
@@ -126,6 +126,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
         self.overlapping_scale = None
+
 
     def init_cp_params(self):
         # self.cp_latents_readout = nn.Parameter(
@@ -370,8 +371,6 @@ class VAETransformer_FCGPFA(nn.Module):
             return mu
         
     def decode(self, z):
-        # proj = torch.einsum('ltn,ml->mnt', self.decoder_matrix, z)
-        # return proj-3
         
         proj = self.sti_decoder(z)  # batch_size x (nbasis * narea * nfactor)
         proj = proj.view(-1, self.narea, self.stimulus_nfactor, self.stimulus_nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
@@ -418,6 +417,70 @@ class VAETransformer_FCGPFA(nn.Module):
 
         return poisson_loss + beta * kl_div
         # return poisson_loss
+
+
+def get_naive_sti_decoder(
+            transformer_vae_output_dim,
+            stimulus_decoder_inter_dim_factor,
+            stimulus_nbasis,
+            narea,
+            stimulus_nfactor,
+    ):
+    if stimulus_decoder_inter_dim_factor == 0:
+        sti_decoder = nn.Linear(transformer_vae_output_dim, 
+                                stimulus_nbasis * narea * stimulus_nfactor)
+        torch.nn.init.kaiming_uniform_(sti_decoder.weight, mode='fan_in', nonlinearity='relu')
+    else:
+        # Enhanced sti_decoder with additional layers and non-linearities
+        sti_decoder = nn.Sequential(
+            nn.Linear(transformer_vae_output_dim, 
+                    transformer_vae_output_dim * stimulus_decoder_inter_dim_factor),
+            nn.ReLU(), # Non-linear activation
+            # Final output to match required dimensions
+            nn.Linear(transformer_vae_output_dim * stimulus_decoder_inter_dim_factor, 
+                        stimulus_nbasis * narea * stimulus_nfactor)  
+        )
+        torch.nn.init.kaiming_uniform_(sti_decoder[0].weight, mode='fan_in', nonlinearity='relu')
+        torch.nn.init.kaiming_uniform_(sti_decoder[2].weight, mode='fan_in', nonlinearity='relu')
+        sti_decoder[2].weight.data *= 1e-3
+        if sti_decoder[2].bias is not None:
+            nn.init.constant_(sti_decoder[2].bias, 0.0)
+    return sti_decoder
+
+
+class area_specific_sti_decoder(nn.Module):
+    def __init__(
+            self,
+            transformer_vae_output_dim,
+            stimulus_decoder_inter_dim_factor,
+            stimulus_nbasis,
+            narea,
+            stimulus_nfactor,
+        ):
+        super(area_specific_sti_decoder, self).__init__()
+        self.narea = narea
+        assert transformer_vae_output_dim % narea == 0, \
+            'transformer_vae_output_dim must be divisible by narea if using area-specific decoder'
+        self.per_area_vae_output_dim = transformer_vae_output_dim // narea
+        self.naive_sti_decoder = nn.ModuleList([
+            get_naive_sti_decoder(
+                self.per_area_vae_output_dim, 
+                stimulus_decoder_inter_dim_factor, 
+                stimulus_nbasis,
+                1, # we need to predict one area for area-specific decoder
+                stimulus_nfactor,
+            )
+            for _ in range(narea)
+        ])
+
+    def forward(self, z):
+        return torch.cat([
+            self.naive_sti_decoder[i](
+                z[:, i*self.per_area_vae_output_dim:(i+1)*self.per_area_vae_output_dim]
+            )
+            for i in range(self.narea)
+        ], dim=1)
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.0, max_len=500):

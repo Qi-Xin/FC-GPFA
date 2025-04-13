@@ -50,7 +50,6 @@ class Trainer:
             self.session_id2nneuron_list['0'] = self.dataloader.nneuron_list
 
         # Initialize model
-        utils.set_seed(1)
         self.initialize_model(verbose=True)
 
     def make_optimizer(self, frozen_params=[]):
@@ -126,6 +125,7 @@ class Trainer:
             coupling_strength_nlatent=self.params['coupling_strength_nlatent'],
             coupling_strength_cov_kernel=K,
             session_id2nneuron_list=self.session_id2nneuron_list,
+            use_area_specific_decoder=self.params['use_area_specific_decoder'],
         ).to(self.device)
         self.make_optimizer()
 

@@ -12,6 +12,7 @@ import pandas as pd
 import scipy.signal
 import torch
 import random
+import os
 
 ##### Useful information about Allen brain areas
 
@@ -188,7 +189,17 @@ def set_seed(seed):
     random.seed(seed)  # Python random module
     np.random.seed(seed)  # Numpy module
     torch.manual_seed(seed)  # CPU
-    torch.cuda.manual_seed(seed)  # GPU
+    
+    # For GPU operations
+    torch.cuda.manual_seed(seed)  # Current GPU
+    torch.cuda.manual_seed_all(seed)  # All GPUs (important for multi-GPU setups)
+    
+    # Make CUDA operations deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # Set Python hash seed
+    os.environ['PYTHONHASHSEED'] = str(seed)
     
 def change_temporal_resolution(spikes, num_merge):
     return [change_temporal_resolution_single(spikes[i], num_merge) for i in range(len(spikes))]
