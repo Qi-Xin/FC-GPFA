@@ -26,6 +26,8 @@ class Trainer:
         self.optimizer = None
         self.results_file = "training_results.json"
         self.penalty_overlapping = self.params['penalty_overlapping']
+        self.penalty_coupling_subset = self.params['penalty_coupling_subset']
+        self.penalty_weight_dissimilarity = self.params['penalty_weight_dissimilarity']
 
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):
@@ -198,6 +200,31 @@ class Trainer:
                 if (self.penalty_overlapping is not None and 
                     self.model.overlapping_scale is not None):
                     loss += self.penalty_overlapping * self.model.overlapping_scale
+                if self.penalty_coupling_subset is not None:
+                    for iarea in range(self.narea):
+                        for jarea in range(self.narea):
+                            if iarea == jarea:
+                                continue
+                            loss += (
+                                self.penalty_coupling_subset \
+                                    * self.model.cp_weight_receiving_dict[
+                                        self.model.current_session_id
+                                    ][iarea][jarea].norm(dim=1).mean()
+                            )
+                            loss += (
+                                self.penalty_coupling_subset \
+                                    * self.model.cp_weight_sending_dict[
+                                        self.model.current_session_id
+                                    ][iarea][jarea].norm(dim=1).mean()
+                            )
+                # if self.penalty_weight_dissimilarity is not None:
+                #     loss += (
+                #         self.penalty_weight_dissimilarity \
+                #             * self.model.cp_weight_sending_dict[
+                #                 self.model.current_session_id
+                #             ].norm(dim=1).mean()
+                #     )
+                
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
