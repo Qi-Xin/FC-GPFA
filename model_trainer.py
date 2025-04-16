@@ -25,9 +25,6 @@ class Trainer:
         self.model = None
         self.optimizer = None
         self.results_file = "training_results.json"
-        self.penalty_overlapping = self.params['penalty_overlapping']
-        self.penalty_coupling_subset = self.params['penalty_coupling_subset']
-        self.penalty_weight_dissimilarity = self.params['penalty_weight_dissimilarity']
 
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):
@@ -108,6 +105,7 @@ class Trainer:
                                                   'nonlinear':0.5})
         coupling_basis = torch.tensor(coupling_basis).float().to(self.device)
         K = torch.tensor(get_K(nt=self.nt, L=self.params['K_tau'], sigma2=self.params['K_sigma2'])).to(self.device)
+        self.D = torch.tensor(utils.second_order_diff_matrix(self.nt)).float().to(self.device) # shape: (nt-2, nt)
 
         self.model = VAETransformer_FCGPFA(
             transformer_num_layers=self.params['transformer_num_layers'],
@@ -197,34 +195,7 @@ class Trainer:
                     self.model.sti_logvar, 
                     beta=self.params['beta']
                 )
-                if (self.penalty_overlapping is not None and 
-                    self.model.overlapping_scale is not None):
-                    loss += self.penalty_overlapping * self.model.overlapping_scale
-                if self.penalty_coupling_subset is not None:
-                    for iarea in range(self.narea):
-                        for jarea in range(self.narea):
-                            if iarea == jarea:
-                                continue
-                            loss += (
-                                self.penalty_coupling_subset \
-                                    * self.model.cp_weight_receiving_dict[
-                                        self.model.current_session_id
-                                    ][iarea][jarea].norm(dim=1).mean()
-                            )
-                            loss += (
-                                self.penalty_coupling_subset \
-                                    * self.model.cp_weight_sending_dict[
-                                        self.model.current_session_id
-                                    ][iarea][jarea].norm(dim=1).mean()
-                            )
-                # if self.penalty_weight_dissimilarity is not None:
-                #     loss += (
-                #         self.penalty_weight_dissimilarity \
-                #             * self.model.cp_weight_sending_dict[
-                #                 self.model.current_session_id
-                #             ].norm(dim=1).mean()
-                #     )
-                
+                loss += self.get_penalty()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
@@ -253,9 +224,7 @@ class Trainer:
                         self.model.sti_logvar, 
                         beta=self.params['beta']
                     )
-                    if (self.penalty_overlapping is not None and 
-                        self.model.overlapping_scale is not None):
-                        loss += self.penalty_overlapping * self.model.overlapping_scale
+                    loss += self.get_penalty()
                     test_loss += loss.item() * batch["spike_trains"].size(2)
                     total_trial += batch["spike_trains"].size(2)
             test_loss /= total_trial
@@ -337,6 +306,51 @@ class Trainer:
         if return_trial_indices:
             outputs.append(np.concatenate(trial_indices_list, axis=0))
         return outputs
+
+    def get_penalty(self):
+        penalty = 0.0
+        if (self.params['penalty_effect_overlapping'] is not None and 
+            self.model.overlapping_scale is not None):
+            penalty += self.params['penalty_effect_overlapping'] * self.model.overlapping_scale
+        if self.params['penalty_coupling_subgroup'] is not None:
+            for iarea in range(self.narea):
+                for jarea in range(self.narea):
+                    if iarea == jarea:
+                        continue
+                    penalty += (
+                        self.params['penalty_coupling_subgroup'] \
+                            * self.model.cp_weight_receiving_dict[
+                                self.model.current_session_id
+                            ][iarea][jarea].norm(dim=1).mean()
+                    )
+                    penalty += (
+                        self.params['penalty_coupling_subgroup'] \
+                            * self.model.cp_weight_sending_dict[
+                                self.model.current_session_id
+                            ][iarea][jarea].norm(dim=1).mean()
+                    )
+        if self.params['penalty_smoothing_spline'] is not None:
+            if self.model.factors.dim() == 3:
+                second_diff = torch.einsum('atf,dt->adf', self.model.factors, self.D)
+            else:
+                second_diff = torch.einsum('matf,dt->madf', self.model.factors, self.D)
+            penalty += self.params['penalty_smoothing_spline'] * torch.mean(second_diff ** 2)
+        if self.params['penalty_diff_loading'] is not None:
+            # add penalty for coupling effect's loading matrix and stimulus effect's loading matrix
+            for iarea in range(self.narea):
+                for jarea in range(self.narea):
+                    if iarea == jarea:
+                        continue
+                    # nneurons x nfactor
+                    sti_loading = self.model.sti_readout_matrix_dict[
+                        self.model.current_session_id][iarea]
+                    # nneurons x nsubspace
+                    cp_loading = self.model.cp_weight_receiving_dict[
+                        self.model.current_session_id][iarea][jarea]
+                    penalty += (
+                        self.params['penalty_diff_loading'] * torch.norm(sti_loading.T @ cp_loading)**2
+                    )
+        return penalty
         
     def save_model_and_hp(self):
         filename = self.path + '/best_model_and_hp.pth'

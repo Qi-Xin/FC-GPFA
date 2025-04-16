@@ -216,6 +216,11 @@ def change_temporal_resolution_single(spike_train, num_merge):
             new_spike_train[t,:,:] = np.sum(spike_train[t*num_merge:(t+1)*num_merge,:,:], axis=0)
     return new_spike_train
 
+def second_order_diff_matrix(T):
+    D = np.diag(np.ones(T - 1), k=-1) \
+      + np.diag(-2 * np.ones(T), k=0) \
+      + np.diag(np.ones(T - 1), k=1)
+    return D[1:-1,:]  # shape: (T-2, T)
 
 def color_by_brain_area(ccf_structure, colortype='normal'):
     """Assign a color for a brain area."""

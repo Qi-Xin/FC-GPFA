@@ -371,12 +371,14 @@ class VAETransformer_FCGPFA(nn.Module):
             return mu
         
     def decode(self, z):
-        
-        proj = self.sti_decoder(z)  # batch_size x (nbasis * narea * nfactor)
-        proj = proj.view(-1, self.narea, self.stimulus_nfactor, self.stimulus_nbasis)  # batch_size x narea x nfactor x nbasis **mafb**
+        # batch_size x (nbasis * narea * nfactor)
+        self.proj = self.sti_decoder(z)
+        # batch_size x narea x nfactor x nbasis **mafb**
+        self.proj = self.proj.view(-1, self.narea, self.stimulus_nfactor, self.stimulus_nbasis)
         
         # Apply stimulus_basis per area
-        self.factors = torch.einsum('mafb,tb->matf', proj, self.stimulus_basis)  # batch_size x narea x nt x nfactor**matf**
+        # batch_size x narea x nt x nfactor**matf**
+        self.factors = torch.einsum('mafb,tb->matf', self.proj, self.stimulus_basis)
         
         # Prepare to collect firing rates from each area
         firing_rates_list = []
