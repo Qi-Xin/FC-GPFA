@@ -30,6 +30,8 @@ class VAETransformer_FCGPFA(nn.Module):
             coupling_strength_cov_kernel: float, # Coupling's parameters
             session_id2nneuron_list: dict, # all session id and corresponding nneuron_list
             use_area_specific_decoder: bool,
+            use_cls: bool,
+            encode_area_separately: bool,
         ):
         # Things that are specific to each session:
         # nneuron_list_dict, num_neurons_dict, accnneuron_dict
@@ -49,8 +51,10 @@ class VAETransformer_FCGPFA(nn.Module):
         self.sample_latent = False  # This will be changed in "Trainer"
         self.num_neurons_dict = {}
         self.use_area_specific_decoder = use_area_specific_decoder
+        self.use_cls = use_cls
+        self.encode_area_separately = encode_area_separately
         
-        ### FCGPFA's additional settings
+        ### Coupling's additional settings
         self.nneuron_list_dict = {}
         self.accnneuron_dict = {}
         self.npadding = npadding
@@ -343,13 +347,13 @@ class VAETransformer_FCGPFA(nn.Module):
             self.overlapping_scale = (numerator / denominator).abs().mean()
         return self.firing_rates_combined.permute(2,1,0)
     
-    def encode(self, src):
+    def encode(self, src, use_cls=False, treat_separately=False):
         # src: tnm
         src = src.permute(0, 2, 1)
         src = self.token_converter_dict[self.current_session_id](src)
         # src: ntokens x batch_size x d_model (tmn)
         
-        # Append CLS token to the beginning of each sequence
+        ### Append CLS token to the beginning of each sequence
         # cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
         # src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
         
