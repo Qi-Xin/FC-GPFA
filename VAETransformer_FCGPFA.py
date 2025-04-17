@@ -31,7 +31,7 @@ class VAETransformer_FCGPFA(nn.Module):
             session_id2nneuron_list: dict, # all session id and corresponding nneuron_list
             use_area_specific_decoder: bool,
             use_cls: bool,
-            encode_area_separately: bool,
+            use_area_specific_encoder: bool,
         ):
         # Things that are specific to each session:
         # nneuron_list_dict, num_neurons_dict, accnneuron_dict
@@ -52,7 +52,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.num_neurons_dict = {}
         self.use_area_specific_decoder = use_area_specific_decoder
         self.use_cls = use_cls
-        self.encode_area_separately = encode_area_separately
+        self.use_area_specific_encoder = use_area_specific_encoder
         
         ### Coupling's additional settings
         self.nneuron_list_dict = {}
@@ -73,8 +73,15 @@ class VAETransformer_FCGPFA(nn.Module):
                                                             dropout=self.transformer_dropout,
                                                             batch_first=True)
         self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=transformer_num_layers)
-        self.to_latent = nn.Linear(self.transformer_d_model, 
-                                   self.transformer_vae_output_dim * 2)  # Output mu and log-variance for each dimension
+        # Output mu and log-variance for each dimension
+        if self.use_area_specific_encoder:
+            assert self.transformer_vae_output_dim % self.narea == 0, 'transformer_vae_output_dim must be divisible by narea'
+            self.per_area_vae_output_dim = self.transformer_vae_output_dim // self.narea
+            self.to_latent = nn.Linear(self.transformer_d_model, 
+                                        self.per_area_vae_output_dim * 2)
+        else:
+            self.to_latent = nn.Linear(self.transformer_d_model, 
+                                        self.transformer_vae_output_dim * 2)
 
         # Initialize the stimulus decoder
         if use_area_specific_decoder:
@@ -102,10 +109,17 @@ class VAETransformer_FCGPFA(nn.Module):
             self.nneuron_list_dict[session_id] = nneuron_list
             self.accnneuron_dict[session_id] = [0]+np.cumsum(nneuron_list).tolist()
             self.num_neurons_dict[session_id] = sum(nneuron_list)
-            self.token_converter_dict[session_id] = nn.Linear(
-                self.num_neurons_dict[session_id], 
-                self.transformer_d_model
-            )
+            if self.use_area_specific_encoder:
+                for iarea in range(self.narea):
+                    self.token_converter_dict[session_id + "_"+ str(iarea)] = nn.Linear(
+                        nneuron_list[iarea], 
+                        self.transformer_d_model
+                    )
+            else:
+                self.token_converter_dict[session_id] = nn.Linear(
+                    self.num_neurons_dict[session_id], 
+                    self.transformer_d_model
+                )
             self.sti_readout_matrix_dict[session_id] = nn.ModuleList([
                 nn.Linear(self.stimulus_nfactor, nneurons, bias=True) for nneurons in self.nneuron_list_dict[session_id]
             ])
@@ -347,24 +361,53 @@ class VAETransformer_FCGPFA(nn.Module):
             self.overlapping_scale = (numerator / denominator).abs().mean()
         return self.firing_rates_combined.permute(2,1,0)
     
-    def encode(self, src, use_cls=False, treat_separately=False):
+    def encode(self, src):
+        ### Depends on parameters: self.use_cls and self.treat_separately
         # src: tnm
         src = src.permute(0, 2, 1)
-        src = self.token_converter_dict[self.current_session_id](src)
-        # src: ntokens x batch_size x d_model (tmn)
-        
-        ### Append CLS token to the beginning of each sequence
-        # cls_tokens = self.cls_token.expand(-1, src.shape[1], -1)  # Expand CLS to batch size
-        # src = torch.cat((cls_tokens, src), dim=0)  # Concatenate CLS token
-        
-        src = self.positional_encoding(src)  # Apply positional encoding
-        encoded = self.transformer_encoder(src) # Put it through the transformer encoder
-        ##################################
-        # cls_encoded = encoded[0,:,:]  # Only take the output from the CLS token
-        cls_encoded = encoded.mean(dim=0)  # average pooling over all tokens
-        ##################################
-        latent_params = self.to_latent(cls_encoded)
-        return latent_params[:, :latent_params.size(-1)//2], latent_params[:, latent_params.size(-1)//2:]  # mu, log_var
+
+        if self.use_area_specific_encoder:
+            latent_params_list = []
+            for iarea in range(self.narea):
+                # src: ntokens x batch_size x d_model (tmn)
+                start_idx = self.accnneuron_dict[self.current_session_id][iarea]
+                end_idx = self.accnneuron_dict[self.current_session_id][iarea+1]
+                area_src = src[:, :, start_idx:end_idx]
+                token_seq = self.token_converter_dict[self.current_session_id + "_"+ str(iarea)](area_src)
+                if self.use_cls:
+                    ### Append CLS token to the beginning of each sequence
+                    cls_tokens = self.cls_token.expand(-1, token_seq.shape[1], -1)  # Expand CLS to batch size
+                    token_seq = torch.cat((cls_tokens, token_seq), dim=0)  # Concatenate CLS token
+                token_seq = self.positional_encoding(token_seq)  # Apply positional encoding
+                encoded = self.transformer_encoder(token_seq) # Put it through the transformer encoder
+                if self.use_cls:
+                    cls_encoded = encoded[0,:,:]  # Only take the output from the CLS token
+                else:
+                    cls_encoded = encoded.mean(dim=0)  # average pooling over all tokens
+                latent_params = self.to_latent(cls_encoded)
+                latent_params_list.append(latent_params)
+            mu_list = [l[:, :self.per_area_vae_output_dim] for l in latent_params_list]
+            log_var_list = [l[:, self.per_area_vae_output_dim:] for l in latent_params_list]
+            mu = torch.cat(mu_list, dim=1)
+            log_var = torch.cat(log_var_list, dim=1)
+            return mu, log_var
+        else:
+            # token_seq: ntokens x batch_size x d_model (tmn)
+            token_seq = self.token_converter_dict[self.current_session_id](src)
+            if self.use_cls:
+                ### Append CLS token to the beginning of each sequence
+                cls_tokens = self.cls_token.expand(-1, token_seq.shape[1], -1)  # Expand CLS to batch size
+                token_seq = torch.cat((cls_tokens, token_seq), dim=0)  # Concatenate CLS token
+            token_seq = self.positional_encoding(token_seq)  # Apply positional encoding
+            encoded = self.transformer_encoder(token_seq) # Put it through the transformer encoder
+            if self.use_cls:
+                cls_encoded = encoded[0,:,:]  # Only take the output from the CLS token
+            else:
+                cls_encoded = encoded.mean(dim=0)  # average pooling over all tokens
+            latent_params = self.to_latent(cls_encoded)
+            mu = latent_params[:, :self.transformer_vae_output_dim]
+            log_var = latent_params[:, self.transformer_vae_output_dim:]
+        return mu, log_var  # mu, log_var
 
     def sample_a_latent(self, mu, sti_logvar):
         if self.sample_latent:

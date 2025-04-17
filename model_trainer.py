@@ -126,6 +126,8 @@ class Trainer:
             coupling_strength_cov_kernel=K,
             session_id2nneuron_list=self.session_id2nneuron_list,
             use_area_specific_decoder=self.params['use_area_specific_decoder'],
+            use_area_specific_encoder=self.params['use_area_specific_encoder'],
+            use_cls=self.params['use_cls'],
         ).to(self.device)
         self.make_optimizer()
 
