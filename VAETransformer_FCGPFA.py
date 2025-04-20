@@ -305,6 +305,27 @@ class VAETransformer_FCGPFA(nn.Module):
                 + self.cp_time_varying_coef_offset
             ]
 
+    def normalize_coupling_coefficients(self):
+        ### Solve identifiability issue
+        ### 1. Make the coupling strength coefficients' absolute values sum to 1
+        ### 2. Make the sending matrix be positive
+        ### 3. Make the receiving matrix be positive
+        with torch.no_grad():
+            for session_id in self.nneuron_list_dict.keys():
+                for iarea in range(self.narea):
+                    for jarea in range(self.narea):
+                        for k in range(self.coupling_nsubspace):
+                            sending_weight = self.cp_weight_sending_dict[session_id][iarea][jarea][:,k]
+                            sending_rescale = torch.sign(sending_weight.mean())*sending_weight.norm()
+                            self.cp_weight_sending_dict[session_id][iarea][jarea][:,k] /=sending_rescale
+                            receiving_weight = self.cp_weight_receiving_dict[session_id][iarea][jarea][:,k]
+                            receiving_rescale = torch.sign(receiving_weight.mean())*receiving_weight.norm()
+                            self.cp_weight_receiving_dict[session_id][iarea][jarea][:,k] /= receiving_rescale
+                            self.cp_beta_coupling_dict[session_id][iarea][jarea][:,k] *= (
+                                sending_rescale*receiving_rescale
+                            )
+
+
     def forward(self, 
                 src,
                 fix_stimulus=False,
