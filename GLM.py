@@ -2555,36 +2555,41 @@ def EIF_simulator(
         ntrial, 
         nneuron, 
         conn, 
-        params = {}, 
-        return_current=False,
-        return_trial_info=False
+        params = {},
+        nneuron_coupling=None,
+        return_I_ext=False,
+        return_trial_info=False,
+        return_I_syn=False,
     ):
 
     with open('EIF_params.pickle', 'rb') as handle:
         EIF_params = pickle.load(handle)
 
     bin_size = 2 # final spikes_rcd bin size in ms
-    dt = 0.1 # ms
+    dt = 0.2 # ms
     ndt = int(1/dt) # number of simulation time bins per ms
     padding = 100 # ms
     nt = (500)*ndt # total number of simulation time bins
     npadding = padding*ndt # number of simulation time bins for padding
     nt_tot = nt + npadding # total number of simulation time bins including padding
     noise_amp = 1.0
+    nneuron_part = int(nneuron/2)
+    if nneuron_coupling is None:
+        nneuron_coupling = nneuron_part
 
     ### Getting the connectivity matrix
-    J = np.zeros((nneuron, nneuron)) # From row i to column j
-    nneuron_part = int(nneuron/2)
+    J_cross = np.zeros((nneuron, nneuron)) # From row i to column j
+    J_recurrent = np.zeros((nneuron, nneuron)) # From row i to column j
     # J[0:nneuron_part,nneuron_part:] = conn
-    J[0:nneuron_part,nneuron_part:] = (
-        np.random.lognormal(mean=np.log(conn), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+    J_cross[0:nneuron_coupling,nneuron_part:nneuron_part+nneuron_coupling] = (
+        np.random.lognormal(mean=np.log(conn), sigma=0.4, size=(nneuron_coupling, nneuron_coupling)) 
         if conn!=0 else 0.0
     )
-    J[0:nneuron_part,0:nneuron_part] = (
-        np.random.lognormal(mean=np.log(0.005), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+    J_recurrent[0:nneuron_part,0:nneuron_part] = (
+        np.random.lognormal(mean=np.log(0.001), sigma=0.4, size=(nneuron_part, nneuron_part)) 
     )
-    J[nneuron_part:,nneuron_part:] = (
-        np.random.lognormal(mean=np.log(0.005), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+    J_recurrent[nneuron_part:,nneuron_part:] = (
+        np.random.lognormal(mean=np.log(0.001), sigma=0.4, size=(nneuron_part, nneuron_part)) 
     )
 
     ### Getting the bump centers and trial info
@@ -2630,27 +2635,38 @@ def EIF_simulator(
         trial_info_gain = gains.flatten()
     if params["external_input_type"] == "two_peaks_with_all_varying":
         # Generate baseline variations using Gaussian Process
-        t = np.arange(nt_tot)[:,np.newaxis,np.newaxis]
-        
+        t = np.arange(nt_tot)
+
         # Generate GP baseline with RBF kernel
-        length_scale = params["gp_time_constant"]*ndt  # Controls smoothness of variations
+        length_scale = params["gp_time_constant"] * ndt  # Controls smoothness of variations
         amplitude = params["gp_amplitude"]  # Controls magnitude of variations
-        
+
         # Generate independent GP for each trial using lower resolution and interpolation
-        downsample_factor = 10  # Reduce resolution by this factor
-        t_low_res = t[::downsample_factor,0,0]
-        nt_low_res = len(t_low_res)
-        
-        gp_baseline = np.zeros((nt_tot, 1, ntrial))
-        for i in range(ntrial):
-            # Generate GP at lower resolution
-            K_low_res = np.exp(-0.5 * (np.subtract.outer(t_low_res, t_low_res)**2) / length_scale**2)
-            gp_low_res = amplitude*np.random.multivariate_normal(np.zeros(nt_low_res), K_low_res)
-            
-            # Interpolate back to original resolution
-            gp_baseline[:,:,i] = np.interp(t[:,0,0], t_low_res, gp_low_res)[:,np.newaxis]
-        
-        I_ext += gp_baseline
+        downsample_factor = 50  # Reduce resolution by this factor
+        t_low_res = t[::downsample_factor]
+
+        gp_baseline = np.zeros((nt_tot, 2, ntrial))
+
+        # Generate GP at lower resolution
+        K_low_res = np.exp(-0.5 * (np.subtract.outer(t_low_res, t_low_res)**2) / length_scale**2)
+
+        # Shape: (2, ntrial, len(t_low_res))
+        gp_low_res = amplitude * np.random.multivariate_normal(
+            np.zeros(len(t_low_res)), K_low_res, size=(2, ntrial)
+        )
+
+        loading_mat = np.random.uniform(low=0.5, high=1.0, size=(nneuron_part, 2))
+
+        for i in range(2):
+            for trial in range(ntrial):
+                # Interpolate for each trial separately
+                gp_baseline[:, i, trial] = np.interp(t, t_low_res, gp_low_res[i, trial, :])
+
+            # Apply loading matrix
+            I_ext[:, i * nneuron_part : (i + 1) * nneuron_part, :] += (
+                gp_baseline[:, i:i+1, :] * loading_mat[None, :, i:i+1]
+            )
+
         trial_info_gain = gp_baseline.mean(axis=(0,1)).flatten()
         trial_info_slope = (gp_baseline[-1,:,:] - gp_baseline[0,:,:]).flatten() / (nt_tot * dt)
 
@@ -2673,9 +2689,12 @@ def EIF_simulator(
     syn_func = (np.exp(-syn_time_line*dt/tau_d)-np.exp(-syn_time_line*dt/tau_r))[:, np.newaxis]
     ntau_ref = tau_ref*ndt
     spikes_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
-
+    I_syn_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
+    I_ext_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
     for itrial in tqdm(range(ntrial)):
         V = Vre*np.ones((nt_tot, nneuron))
+        I_syn_cross = np.zeros((nt_tot+nsyn_func+1, nneuron))
+        I_syn_recurrent = np.zeros((nt_tot+nsyn_func+1, nneuron))
         I_syn = np.zeros((nt_tot+nsyn_func+1, nneuron))
         spikes = np.zeros((nt_tot, nneuron))
 
@@ -2683,10 +2702,12 @@ def EIF_simulator(
             I_leak = -dt/tau*(V[t-1,:]-EL) + dt/tau*DltT*np.exp((V[t-1,:]-VT)/DltT)
             I_noise = np.random.normal(0, noise_amp**2, nneuron)
             dV = I_leak + I_noise + I_syn[t,:] + I_ext[t,:,itrial]
-            V[t,:] = V[t-1,:] + dV
+            V[t,:] = V[t-1,:] + dV*(int(dt/0.1))
 
             spikes[t,:] = (V[t,:]>=Vth).astype(int)
-            I_syn[(t+1):(t+nsyn_func+1),:] += spikes[t:(t+1),:]@J*syn_func
+            I_syn_cross[(t+1):(t+nsyn_func+1),:] += spikes[t:(t+1),:]@J_cross*syn_func
+            I_syn_recurrent[(t+1):(t+nsyn_func+1),:] += spikes[t:(t+1),:]@J_recurrent*syn_func
+            I_syn[(t+1):(t+nsyn_func+1),:] = I_syn_cross[(t+1):(t+nsyn_func+1),:] + I_syn_recurrent[(t+1):(t+nsyn_func+1),:]
 
             in_ref = ((spikes[max(0,t-ntau_ref):(t+1),:].sum(axis=0))>0).astype(int)
             V[t,:] += in_ref*(Vre-V[t,:])
@@ -2695,12 +2716,16 @@ def EIF_simulator(
             if t % (ndt*bin_size) == 0:
                 time_idx = t // (ndt*bin_size)
                 spikes_rcd[time_idx,:,itrial] = spikes[t-ndt*bin_size+1:t+1,:].sum(axis=0)
-    
+                I_syn_rcd[time_idx,:,itrial] = I_syn_cross[t-ndt*bin_size+1:t+1,:].mean(axis=0)
+                I_ext_rcd[time_idx,:,itrial] = I_ext[t-ndt*bin_size+1:t+1,:, itrial].mean(axis=0)
+            
     res = [spikes_rcd]
     if return_trial_info:
         res.append({"bump": trial_info_bump, "gain": trial_info_gain, "slope": trial_info_slope})
-    if return_current:
+    if return_I_ext:
         res.append(I_ext)
+    if return_I_syn:
+        res.append(I_syn_rcd)
     return res
 
 
