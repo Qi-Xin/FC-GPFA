@@ -268,6 +268,7 @@ class Trainer:
             fix_latents=False,
             return_torch=True, 
             return_trial_indices=True,
+            return_spike_trains=False,
         ):
         self.model.eval()
         self.model.sample_latent = False
@@ -307,6 +308,8 @@ class Trainer:
             outputs = [x.numpy() for x in outputs]
         if return_trial_indices:
             outputs.append(np.concatenate(trial_indices_list, axis=0))
+        if return_spike_trains:
+            outputs.append(batch["spike_trains"][self.npadding:,:,:].cpu())
         return outputs
 
     def get_penalty(self):

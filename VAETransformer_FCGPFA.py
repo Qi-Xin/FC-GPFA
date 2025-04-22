@@ -324,6 +324,13 @@ class VAETransformer_FCGPFA(nn.Module):
                             self.cp_beta_coupling_dict[session_id][iarea][jarea][:,k] *= (
                                 sending_rescale*receiving_rescale
                             )
+                self.coupling_filters_dict[session_id] = [
+                    [torch.einsum(
+                        'tb,bs->ts', 
+                        self.coupling_basis, 
+                        self.cp_beta_coupling_dict[session_id][iarea][jarea]
+                    ) for jarea in range(self.narea)]
+                    for iarea in range(self.narea)]
 
 
     def forward(self, 

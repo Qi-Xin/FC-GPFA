@@ -932,3 +932,60 @@ def comp_eig_D (Ks , Kt , sig2n ):
 def has_key_word(name, key_word_list):
     return any(key_word in name for key_word in key_word_list)
 
+
+def loss_function_per_trial(log_firing_rate, spikes):
+    # nt x nneuron x ntrial
+    poisson_loss = (torch.exp(log_firing_rate) - spikes * log_firing_rate).mean(axis=(0,1))
+    return poisson_loss
+
+
+def find_middle_fit_trial(firing_rate_test, spike_train_test):
+    # nt x nneuron x ntrial
+    loss_per_trial = loss_function_per_trial(
+        firing_rate_test, 
+        spike_train_test,
+    )
+
+    middle_fit_trial_idx = torch.argsort(loss_per_trial)[len(loss_per_trial)//2].item()
+    return middle_fit_trial_idx
+
+
+def centralize_factor(factor):
+    # nt x nfactor
+    return factor - factor.mean(axis=0)
+
+
+def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
+    """
+    Horizontal version: X = loading value, Y = neuron.
+    Ground truth = circles, Fitted = squares.
+    
+    Parameters:
+        ax: matplotlib Axes
+        ground_truth, fitted: np.ndarray of shape (n_neurons, n_factors)
+        title: title
+        sort: whether to sort neurons by ground truth
+    """
+
+    if sort:
+        sort_idx = np.argsort(gt)
+        gt = gt[sort_idx]
+        ft = ft[sort_idx]
+
+    neurons = np.arange(len(gt))
+
+    # Plot horizontal scatter
+    ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5,)
+    ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue')
+
+    # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
+    ax.set_title(title, fontsize=7)
+    ax.set_ylabel(r'Shuffled Neurons', fontsize=6)
+    ax.set_xlabel(r'Weight', fontsize=6)
+    ax.tick_params(labelsize=6)
+    ax.set_ylim(-1, len(gt))
+    ax.set_yticks([])
+
+    # handles, labels = ax.get_legend_handles_labels()
+    # if handles:
+    #     ax.legend(handles, labels, loc='lower right', frameon=False, fontsize=6)
