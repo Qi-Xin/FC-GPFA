@@ -2557,6 +2557,7 @@ def EIF_simulator(
         conn, 
         params = {},
         nneuron_coupling=None,
+        shared_background=0.0,
         return_I_ext=False,
         return_trial_info=False,
         return_I_syn=False,
@@ -2651,9 +2652,13 @@ def EIF_simulator(
         K_low_res = np.exp(-0.5 * (np.subtract.outer(t_low_res, t_low_res)**2) / length_scale**2)
 
         # Shape: (2, ntrial, len(t_low_res))
+        shared_background = np.clip(shared_background, 0.0, 1.0)
         gp_low_res = amplitude * np.random.multivariate_normal(
             np.zeros(len(t_low_res)), K_low_res, size=(2, ntrial)
         )
+        indep_component = np.sqrt(1 - shared_background) * gp_low_res[1, :, :]
+        shared_component = np.sqrt(shared_background) * gp_low_res[0, :, :]
+        gp_low_res[1, :, :] = indep_component + shared_component
 
         loading_mat = np.random.uniform(low=0.5, high=1.0, size=(nneuron_part, 2))
 
