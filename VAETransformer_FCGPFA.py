@@ -32,6 +32,7 @@ class VAETransformer_FCGPFA(nn.Module):
             use_area_specific_decoder: bool,
             use_cls: bool,
             use_area_specific_encoder: bool,
+            use_self_history: bool,
         ):
         # Things that are specific to each session:
         # nneuron_list_dict, num_neurons_dict, accnneuron_dict
@@ -53,6 +54,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.use_area_specific_decoder = use_area_specific_decoder
         self.use_cls = use_cls
         self.use_area_specific_encoder = use_area_specific_encoder
+        self.use_self_history = use_self_history
         
         ### Coupling's additional settings
         self.nneuron_list_dict = {}
@@ -141,6 +143,7 @@ class VAETransformer_FCGPFA(nn.Module):
         self.hessian = None
         self.coupling_basis = coupling_basis
         self.init_cp_params()
+        self.init_self_history()
         self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
         self.overlapping_scale = None
@@ -187,6 +190,54 @@ class VAETransformer_FCGPFA(nn.Module):
         })
 
         self.coupling_filters_dict = {}
+
+    def init_self_history(self):
+        self.beta_self_history_dict = nn.ModuleDict({
+            str(session_id): nn.ParameterList([
+                nn.Parameter(1.0*(torch.zeros((
+                    self.coupling_basis.shape[1], 
+                    self.nneuron_list_dict[session_id][jarea]
+                )) ))
+                for jarea in range(self.narea)])
+            for session_id in self.nneuron_list_dict.keys()
+        })
+
+    def get_self_history(self):
+        ### Get self-history filters
+        current_session_id = src['session_id']
+        # basis, beta_self_history -> self_history_filters
+        self.self_history_filters_dict[current_session_id] = [torch.einsum(
+                'tb,bs->ts', 
+                self.coupling_basis, 
+                self.beta_self_history_dict[current_session_id][jarea]
+            ) for jarea in range(self.narea)]
+        
+        ### Get self-history outputs
+        accnneuron = self.accnneuron_dict[current_session_id]
+        self_history_filters = self.coupling_filters_dict[current_session_id]
+        spike_trains = src["spike_trains"].permute(2,1,0)
+
+        for iarea in range(self.narea):
+            # spikes(mit), self_history_filters(t) -> self_history_outputs(mit)
+            self.self_history_outputs[iarea] = conv_subspace(
+                spike_trains[:,accnneuron[iarea]:accnneuron[iarea+1],:], 
+                coupling_filters[iarea][jarea], npadding=self.npadding
+            )
+
+            # spikes(mit), self_history_filters(ts), cp_weight_sending(is) -> coupling_outputs in subspace(mst)
+            self.coupling_outputs_subspace[iarea][jarea] = torch.einsum(
+                'mist,is->mst', 
+                conv_subspace(
+                    spike_trains[:,accnneuron[iarea]:accnneuron[iarea+1],:], 
+                    coupling_filters[iarea][jarea], npadding=self.npadding
+                ),
+                cp_weight_sending[iarea][jarea]
+            )
+            self.coupling_outputs[iarea][jarea] = torch.einsum('mst,js->mjt', 
+                                            self.coupling_outputs_subspace[iarea][jarea],
+                                            cp_weight_receiving[iarea][jarea],
+            )
+
 
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         # device = self.cp_latents_readout.device
@@ -859,3 +910,55 @@ def conv_subspace(raw_input, kernel, npadding=None, enforce_causality=True):
     if npadding is not None:
         G = G[:,:,npadding:,:]
     return G.transpose(-1,-2)
+
+def conv_individual(raw_input, kernel, npadding=None, enforce_causality=True):
+    """
+    Applies convolution operation on each neuron's own spike history using the given kernel.
+
+    Args:
+        raw_input (torch.Tensor): Input tensor of shape (ntrial, nneuroni, nt).
+        kernel (torch.Tensor): Convolution kernel of shape (ntau, nneuroni).
+        npadding (int, optional): Number of padding time points to remove from the output. Defaults to None.
+        enforce_causality (bool, optional): Whether to enforce causality by zero-padding the kernel. Defaults to True.
+
+    Returns:
+        torch.Tensor: Convolved tensor of shape (ntrial, nneuroni, nt).
+
+    Raises:
+        AssertionError: If the number of neurons in the kernel is not the same as the input.
+    """
+    assert kernel.shape[1] == raw_input.shape[1], "Kernel must match number of neurons in input"
+    device = raw_input.device
+
+    ntrial, nneuroni, nt = raw_input.shape
+    ntau = kernel.shape[0]
+
+    if enforce_causality:
+        # prepend one time point of zeros to the kernel for causality
+        zero_pad = torch.zeros((1, nneuroni), dtype=kernel.dtype, device=device)
+        kernel = torch.cat((zero_pad, kernel), dim=0)
+
+    ntau = kernel.shape[0]
+    nn = nt + ntau - 1  # FFT size
+
+    # FFT of input: (ntrial, nneuroni, nn)
+    input_fft = torch.fft.fft(raw_input, n=nn, dim=2)
+
+    # FFT of kernels: (nneuroni, nn)
+    kernel_fft = torch.fft.fft(kernel.T, n=nn)  # transpose to (nneuroni, ntau)
+
+    # Element-wise multiply in frequency domain
+    # Result shape: (ntrial, nneuroni, nn)
+    conv_fft = input_fft * kernel_fft[None, :, :]
+
+    # Inverse FFT to get time domain signal
+    conv_time = torch.fft.ifft(conv_fft, dim=2).real
+    conv_time[torch.abs(conv_time) < 1e-5] = 0
+
+    # Truncate to match input time dimension
+    conv_time = conv_time[:, :, :nt]
+
+    if npadding is not None:
+        conv_time = conv_time[:, :, npadding:]
+
+    return conv_time
