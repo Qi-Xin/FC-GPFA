@@ -314,9 +314,6 @@ class Trainer:
 
     def get_penalty(self):
         penalty = 0.0
-        if (self.params['penalty_effect_overlapping'] is not None and 
-            self.model.overlapping_scale is not None):
-            penalty += self.params['penalty_effect_overlapping'] * self.model.overlapping_scale
         if self.params['penalty_coupling_subgroup'] is not None:
             for iarea in range(self.narea):
                 for jarea in range(self.narea):

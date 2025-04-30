@@ -143,10 +143,9 @@ class VAETransformer_FCGPFA(nn.Module):
         self.hessian = None
         self.coupling_basis = coupling_basis
         self.init_cp_params()
-        self.init_self_history()
+        self.init_self_history_params()
         self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
         self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
-        self.overlapping_scale = None
 
 
     def init_cp_params(self):
@@ -191,7 +190,7 @@ class VAETransformer_FCGPFA(nn.Module):
 
         self.coupling_filters_dict = {}
 
-    def init_self_history(self):
+    def init_self_history_params(self):
         self.beta_self_history_dict = nn.ModuleDict({
             str(session_id): nn.ParameterList([
                 nn.Parameter(1.0*(torch.zeros((
@@ -207,10 +206,10 @@ class VAETransformer_FCGPFA(nn.Module):
         current_session_id = src['session_id']
         # basis, beta_self_history -> self_history_filters
         self.self_history_filters_dict[current_session_id] = [torch.einsum(
-                'tb,bs->ts', 
+                'tb,bi->ti', 
                 self.coupling_basis, 
-                self.beta_self_history_dict[current_session_id][jarea]
-            ) for jarea in range(self.narea)]
+                self.beta_self_history_dict[current_session_id][iarea]
+            ) for iarea in range(self.narea)]
         
         ### Get self-history outputs
         accnneuron = self.accnneuron_dict[current_session_id]
@@ -219,25 +218,10 @@ class VAETransformer_FCGPFA(nn.Module):
 
         for iarea in range(self.narea):
             # spikes(mit), self_history_filters(t) -> self_history_outputs(mit)
-            self.self_history_outputs[iarea] = conv_subspace(
+            self.self_history_outputs[iarea] = conv_individual(
                 spike_trains[:,accnneuron[iarea]:accnneuron[iarea+1],:], 
-                coupling_filters[iarea][jarea], npadding=self.npadding
+                coupling_filters[iarea], npadding=self.npadding
             )
-
-            # spikes(mit), self_history_filters(ts), cp_weight_sending(is) -> coupling_outputs in subspace(mst)
-            self.coupling_outputs_subspace[iarea][jarea] = torch.einsum(
-                'mist,is->mst', 
-                conv_subspace(
-                    spike_trains[:,accnneuron[iarea]:accnneuron[iarea+1],:], 
-                    coupling_filters[iarea][jarea], npadding=self.npadding
-                ),
-                cp_weight_sending[iarea][jarea]
-            )
-            self.coupling_outputs[iarea][jarea] = torch.einsum('mst,js->mjt', 
-                                            self.coupling_outputs_subspace[iarea][jarea],
-                                            cp_weight_receiving[iarea][jarea],
-            )
-
 
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         # device = self.cp_latents_readout.device
@@ -430,14 +414,6 @@ class VAETransformer_FCGPFA(nn.Module):
                 -0 + self.firing_rates_stimulus + self.firing_rates_coupling
             )
 
-            # Calculate temporal correlation between stimulus and coupling firing rates
-            # Center the data by subtracting means along time dimension
-            stim_centered = self.firing_rates_stimulus - self.firing_rates_stimulus.mean(dim=2, keepdim=True) 
-            coup_centered = self.firing_rates_coupling - self.firing_rates_coupling.mean(dim=2, keepdim=True)
-            eps = 1e-5
-            numerator = (stim_centered * coup_centered).mean(dim=2)
-            denominator = torch.sqrt((stim_centered**2).mean(dim=2) * (coup_centered**2).mean(dim=2) + eps)
-            self.overlapping_scale = (numerator / denominator).abs().mean()
         return self.firing_rates_combined.permute(2,1,0)
     
     def encode(self, src):
@@ -910,6 +886,7 @@ def conv_subspace(raw_input, kernel, npadding=None, enforce_causality=True):
     if npadding is not None:
         G = G[:,:,npadding:,:]
     return G.transpose(-1,-2)
+
 
 def conv_individual(raw_input, kernel, npadding=None, enforce_causality=True):
     """
