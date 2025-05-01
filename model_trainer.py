@@ -51,48 +51,86 @@ class Trainer:
         # Initialize model
         self.initialize_model(verbose=True)
 
-    def make_optimizer(self, frozen_params=[]):
-        # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
-        ###############################
-        transformer_group = ['transformer_encoder', 'to_latent', 'token_converter', 'cls_token']
-        sti_group = ['sti_readout', 'sti_decoder', 'sti_inhomo']
-        cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
-                    'cp_weight_sending', 'cp_weight_receiving']
+    # def make_optimizer(self, frozen_params=[]):
+    #     # self.optimizer = optim.Adam(self.model.parameters(), lr=self.params['lr'])
+    #     ###############################
+    #     transformer_group = ['transformer_encoder', 'to_latent', 'token_converter', 'cls_token']
+    #     sti_group = ['sti_readout', 'sti_decoder', 'sti_inhomo']
+    #     cp_group = ['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
+    #                 'cp_weight_sending', 'cp_weight_receiving']
         
-        # Define different learning rates
-        transformer_lr = self.params['lr_transformer']
-        sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
-        cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
-        weight_decay = self.params['weight_decay']
+    #     # Define different learning rates
+    #     transformer_lr = self.params['lr_transformer']
+    #     sti_lr = self.params['lr_sti']  # Higher learning rate for decoder_matrix
+    #     cp_lr = self.params['lr_cp']  # Learning rate for coupling parameters
+    #     weight_decay = self.params['weight_decay']
 
-        # Configure optimizer with two parameter groups
-        params_not_assigned = [n for n, p in self.model.named_parameters()
-            if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
-        if len(params_not_assigned)!=0:
-            print(params_not_assigned)
-            raise ValueError("Some parameters are not assigned to any group.")
-        self.optimizer = optim.Adam([
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if (
-                            any([key_word in n for key_word in transformer_group]) 
-                            and (not any(key_word in n for key_word in frozen_params))
-                        )], 
-             'lr': transformer_lr},
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if (
-                            any([key_word in n for key_word in sti_group])
-                            and (not any(key_word in n for key_word in frozen_params))
-                        )], 
-             'lr': sti_lr},
-            {'params': [p for n, p in self.model.named_parameters() 
-                        if (
-                            any([key_word in n for key_word in cp_group])
-                            and (not any(key_word in n for key_word in frozen_params))
-                        )], 
-             'lr': cp_lr},
-        ], weight_decay=weight_decay)
+    #     # Configure optimizer with parameter groups
+    #     params_not_assigned = [n for n, p in self.model.named_parameters()
+    #         if all([key_word not in n for key_word in transformer_group+sti_group+cp_group])]
+    #     if len(params_not_assigned)!=0:
+    #         print(params_not_assigned)
+    #         raise ValueError("Some parameters are not assigned to any group.")
+    #     self.optimizer = optim.Adam([
+    #         {'params': [p for n, p in self.model.named_parameters() 
+    #                     if (
+    #                         any([key_word in n for key_word in transformer_group]) 
+    #                         and (not any(key_word in n for key_word in frozen_params))
+    #                     )], 
+    #          'lr': transformer_lr},
+    #         {'params': [p for n, p in self.model.named_parameters() 
+    #                     if (
+    #                         any([key_word in n for key_word in sti_group])
+    #                         and (not any(key_word in n for key_word in frozen_params))
+    #                     )], 
+    #          'lr': sti_lr},
+    #         {'params': [p for n, p in self.model.named_parameters() 
+    #                     if (
+    #                         any([key_word in n for key_word in cp_group])
+    #                         and (not any(key_word in n for key_word in frozen_params))
+    #                     )], 
+    #          'lr': cp_lr},
+    #     ], weight_decay=weight_decay)
+    
+    def make_optimizer(self, frozen_params=[]):
+        """
+        Creates an Adam optimizer with different learning rates for different model component groups.
         
-        ###############################
+        Args:
+            frozen_params (list): List of substrings; parameters matching any of these will be frozen.
+        """
+        # Define parameter groups and their learning rates
+        param_group_specs = [
+            (['transformer_encoder', 'to_latent', 'token_converter', 'cls_token'], self.params['lr_transformer']),
+            (['sti_readout', 'sti_decoder', 'sti_inhomo'], self.params['lr_sti']),
+            (['cp_latents_readout', 'cp_time_varying_coef_offset', 'cp_beta_coupling', 
+            'cp_weight_sending', 'cp_weight_receiving'], self.params['lr_cp']),
+            (['self_history'], self.params['lr_self_history']),
+        ]
+
+        # Build optimizer param groups
+        param_groups = []
+        all_group_keywords = []
+
+        for keywords, lr in param_group_specs:
+            all_group_keywords.extend(keywords)
+            group_params = [
+                p for n, p in self.model.named_parameters()
+                if any(kw in n for kw in keywords) and not any(frozen in n for frozen in frozen_params)
+            ]
+            param_groups.append({'params': group_params, 'lr': lr})
+
+        # Check for any unassigned parameters
+        unassigned = [
+            n for n, _ in self.model.named_parameters()
+            if all(kw not in n for kw in all_group_keywords)
+        ]
+        if unassigned:
+            print("Unassigned parameters:", unassigned)
+            raise ValueError("Some parameters are not assigned to any group.")
+
+        # Create optimizer
+        self.optimizer = optim.Adam(param_groups, weight_decay=self.params['weight_decay'])
          
     def initialize_model(self, verbose=False):
         stimulus_basis = GLM.inhomo_baseline(ntrial=1, start=0, end=self.nt, dt=1, 
@@ -104,6 +142,10 @@ class Trainer:
                                                   'num':self.params['coupling_basis_num'], 
                                                   'nonlinear':0.5})
         coupling_basis = torch.tensor(coupling_basis).float().to(self.device)
+        self_history_basis = GLM.make_pillow_basis(**{'peaks_max':self.params['self_history_basis_peaks_max'], 
+                                                  'num':self.params['self_history_basis_num'], 
+                                                  'nonlinear':self.params['self_history_basis_nonlinear']})
+        self_history_basis = torch.tensor(self_history_basis).float().to(self.device)
         K = torch.tensor(get_K(nt=self.nt, L=self.params['K_tau'], sigma2=self.params['K_sigma2'])).to(self.device)
         self.D = torch.tensor(utils.second_order_diff_matrix(self.nt)).float().to(self.device) # shape: (nt-2, nt)
 
@@ -124,6 +166,7 @@ class Trainer:
             use_self_coupling=self.params['use_self_coupling'],
             coupling_strength_nlatent=self.params['coupling_strength_nlatent'],
             coupling_strength_cov_kernel=K,
+            self_history_basis=self_history_basis,
             session_id2nneuron_list=self.session_id2nneuron_list,
             use_area_specific_decoder=self.params['use_area_specific_decoder'],
             use_area_specific_encoder=self.params['use_area_specific_encoder'],
@@ -147,6 +190,7 @@ class Trainer:
             record_results=False,
             include_stimulus=True,
             include_coupling=True, 
+            include_self_history=True,
             fix_stimulus=False,
             fix_latents=False, 
         ):
@@ -187,6 +231,7 @@ class Trainer:
                     batch,
                     include_stimulus=include_stimulus,
                     include_coupling=include_coupling,
+                    include_self_history=include_self_history,
                     fix_stimulus=fix_stimulus,
                     fix_latents=fix_latents,
                 )
@@ -216,6 +261,7 @@ class Trainer:
                         batch,
                         include_stimulus=include_stimulus,
                         include_coupling=include_coupling,
+                        include_self_history=include_self_history,
                         fix_stimulus=fix_stimulus,
                         fix_latents=fix_latents,
                     )
@@ -263,7 +309,8 @@ class Trainer:
             dataset='test',
             batch_indices=[0,1,2,3,4],
             include_stimulus=True,
-            include_coupling=False, 
+            include_coupling=False,
+            include_self_history=False,
             fix_stimulus=False,
             fix_latents=False,
             return_torch=True, 
@@ -293,6 +340,7 @@ class Trainer:
                     batch,
                     include_stimulus=include_stimulus,
                     include_coupling=include_coupling,
+                    include_self_history=include_self_history,
                     fix_stimulus=fix_stimulus,
                     fix_latents=fix_latents,
                 )

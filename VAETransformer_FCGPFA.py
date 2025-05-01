@@ -28,11 +28,11 @@ class VAETransformer_FCGPFA(nn.Module):
             use_self_coupling: bool, # Coupling's feature:
             coupling_strength_nlatent: int, # Coupling's feature:
             coupling_strength_cov_kernel: float, # Coupling's parameters
+            self_history_basis: torch.Tensor, # Self-history's feature:
             session_id2nneuron_list: dict, # all session id and corresponding nneuron_list
             use_area_specific_decoder: bool,
             use_cls: bool,
             use_area_specific_encoder: bool,
-            use_self_history: bool,
         ):
         # Things that are specific to each session:
         # nneuron_list_dict, num_neurons_dict, accnneuron_dict
@@ -54,7 +54,6 @@ class VAETransformer_FCGPFA(nn.Module):
         self.use_area_specific_decoder = use_area_specific_decoder
         self.use_cls = use_cls
         self.use_area_specific_encoder = use_area_specific_encoder
-        self.use_self_history = use_self_history
         
         ### Coupling's additional settings
         self.nneuron_list_dict = {}
@@ -142,11 +141,9 @@ class VAETransformer_FCGPFA(nn.Module):
         self.mu = None
         self.hessian = None
         self.coupling_basis = coupling_basis
+        self.self_history_basis = self_history_basis
         self.init_cp_params()
         self.init_self_history_params()
-        self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
-        self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
-
 
     def init_cp_params(self):
         # self.cp_latents_readout = nn.Parameter(
@@ -189,39 +186,41 @@ class VAETransformer_FCGPFA(nn.Module):
         })
 
         self.coupling_filters_dict = {}
+        self.coupling_outputs_subspace = [[None]*self.narea for _ in range(self.narea)]
+        self.coupling_outputs = [[None]*self.narea for _ in range(self.narea)]
 
     def init_self_history_params(self):
-        self.beta_self_history_dict = nn.ModuleDict({
-            str(session_id): nn.ParameterList([
-                nn.Parameter(1.0*(torch.zeros((
-                    self.coupling_basis.shape[1], 
-                    self.nneuron_list_dict[session_id][jarea]
-                )) ))
-                for jarea in range(self.narea)])
-            for session_id in self.nneuron_list_dict.keys()
+        self.beta_self_history_dict = nn.ParameterDict({
+            str(session_id): nn.Parameter(
+                -1.0*(torch.ones((
+                    self.self_history_basis.shape[1], 
+                    self.num_neurons_dict[session_id]
+                )))
+            )
+            for session_id in self.num_neurons_dict.keys()
         })
 
-    def get_self_history(self):
+        self.self_history_filters_dict = {}
+
+    def get_self_history(self, src):
         ### Get self-history filters
         current_session_id = src['session_id']
         # basis, beta_self_history -> self_history_filters
-        self.self_history_filters_dict[current_session_id] = [torch.einsum(
-                'tb,bi->ti', 
-                self.coupling_basis, 
-                self.beta_self_history_dict[current_session_id][iarea]
-            ) for iarea in range(self.narea)]
+        self.self_history_filters_dict[current_session_id] = torch.einsum(
+            'tb,bn->tn', 
+            self.self_history_basis, 
+            self.beta_self_history_dict[current_session_id]
+        )
         
         ### Get self-history outputs
         accnneuron = self.accnneuron_dict[current_session_id]
-        self_history_filters = self.coupling_filters_dict[current_session_id]
         spike_trains = src["spike_trains"].permute(2,1,0)
 
-        for iarea in range(self.narea):
-            # spikes(mit), self_history_filters(t) -> self_history_outputs(mit)
-            self.self_history_outputs[iarea] = conv_individual(
-                spike_trains[:,accnneuron[iarea]:accnneuron[iarea+1],:], 
-                coupling_filters[iarea], npadding=self.npadding
-            )
+        # spikes(mnt), self_history_filters(t) -> self_history_outputs(mnt)
+        self.self_history_outputs = conv_individual(
+            spike_trains,
+            self.self_history_filters_dict[current_session_id], npadding=self.npadding
+        )
 
     def get_latents(self, lr=5e-1, max_iter=1000, tol=1e-2, verbose=False, fix_latents=False):
         # device = self.cp_latents_readout.device
@@ -373,7 +372,8 @@ class VAETransformer_FCGPFA(nn.Module):
                 fix_stimulus=False,
                 fix_latents=False, 
                 include_stimulus=True,
-                include_coupling=True, 
+                include_coupling=True,
+                include_self_history=False,
         ):
         assert include_coupling or include_stimulus, 'Need to have either coupling or stimulus'
 
@@ -403,17 +403,20 @@ class VAETransformer_FCGPFA(nn.Module):
             self.get_coupling_outputs(src)
             self.get_latents(fix_latents=fix_latents)
             self.get_firing_rates_coupling(src, fix_latents=fix_latents)
+        if include_self_history:
+            self.get_self_history(src)
         
         ### Return the combined firing rates
         if include_coupling and (not include_stimulus):
-            self.firing_rates_combined = -0 + self.firing_rates_coupling
+            self.firing_rates_combined = self.firing_rates_coupling
         elif include_stimulus and (not include_coupling):
-            self.firing_rates_combined = -0 + self.firing_rates_stimulus
+            self.firing_rates_combined = self.firing_rates_stimulus
         else:
             self.firing_rates_combined = (
-                -0 + self.firing_rates_stimulus + self.firing_rates_coupling
+                self.firing_rates_stimulus + self.firing_rates_coupling
             )
-
+        if include_self_history:
+            self.firing_rates_combined += self.self_history_outputs
         return self.firing_rates_combined.permute(2,1,0)
     
     def encode(self, src):
