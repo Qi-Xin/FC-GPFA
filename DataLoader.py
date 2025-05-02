@@ -182,17 +182,53 @@ class Allen_dataloader_multi_session():
     def _split_data(self):
         """Split trials into train/val/test sets. 
         Keep all trials in a batch to be from the same session"""
-        all_batches = []
-        for session_trial_indice in self.session_trial_indices:
-            all_batches += self._create_batches(np.arange(*session_trial_indice))
-        if self.shuffle:
-            np.random.shuffle(all_batches)
+        self.train_batches = []
+        self.val_batches = []
+        self.test_batches = []
+        for i, session_id in enumerate(self.session_ids):
+            # Ensure all trials in a batch are from the same session
+            # Also ensure trials under the same stimulus type are 
+            # uniformly distributed in train/val/test
+            condition2trials_dict = (
+                self.sessions[session_id].get_condition2trials_dict()
+            )
+            train_trials = []
+            val_trials = []
+            test_trials = []
+            for trials_same_condition in condition2trials_dict.values():
+                # Make local indices to global indices
+                trials_same_condition += self.session_trial_indices[i][0]
+                trials_same_condition = trials_same_condition.tolist()
+                if self.shuffle:
+                    np.random.shuffle(trials_same_condition)
+                ntrials = len(trials_same_condition)
+                if ntrials == 15:
+                    train_trials += trials_same_condition[:9]
+                    val_trials += trials_same_condition[9:11]
+                    test_trials += trials_same_condition[11:]
+                else:
+                    train_size = int(ntrials*self.train_ratio)
+                    val_size = int(ntrials*self.val_ratio)
+                    train_trials += trials_same_condition[:train_size]
+                    val_trials += trials_same_condition[train_size:train_size+val_size]
+                    test_trials += trials_same_condition[train_size+val_size:]
+            if self.shuffle:
+                train_trials = np.random.shuffle(train_trials)
+            else:
+                train_trials = np.sort(train_trials)
+            
+            train_batches = self._create_batches(train_trials)
+            val_batches = self._create_batches(val_trials)
+            test_batches = self._create_batches(test_trials)
         
-        train_size = int(len(all_batches) * self.train_ratio)
-        val_size = int(len(all_batches) * self.val_ratio)
-        self.train_batches = all_batches[:train_size]
-        self.val_batches = all_batches[train_size:train_size + val_size]
-        self.test_batches = all_batches[train_size + val_size:]
+            self.train_batches += train_batches
+            self.val_batches += val_batches
+            self.test_batches += test_batches
+        
+        if self.shuffle:
+            # not like all batches are from session 1 first, then all from session 2, etc.
+            np.random.shuffle(self.train_batches)
+
 
     def _create_batches(self, indices):
         """Create batches from indices"""
@@ -529,6 +565,16 @@ class Allen_dataset:
                 "presentation_ids": selected_presentation_ids, 
                 "neuron_id": self.unit_ids}
 
+    def get_condition2trials_dict(self):
+        """Get trials for each condition"""
+        # Create a new column for grouping
+        self.presentation_table['group_key'] = self.presentation_table.apply(custom_group_key, axis=1)
+        # Group by this new key and get indices
+        self.condition2trials_dict = (
+            self.presentation_table.groupby('group_key').apply(lambda x: x.index.values).to_dict()
+        )
+        return self.condition2trials_dict
+
     def get_running(self, method="Pillow"):
         running_speed = self._session.running_speed
         running_speed['mean_time'] = (running_speed['start_time']+running_speed['end_time'])/2
@@ -579,3 +625,9 @@ class Allen_dataset:
             self.mean_pupil_diam[i] = self.pupil_diam[:,i].mean()
             self.min_pupil_diam[i] = self.pupil_diam[:,i].min()
             self.max_pupil_diam[i] = self.pupil_diam[:,i].max()
+
+def custom_group_key(row):
+    if row['stimulus_name'] == 'drifting_gratings':
+        return ('drifting_gratings', row['stimulus_condition_id'])
+    else:
+        return (row['stimulus_name'], None)
