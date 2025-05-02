@@ -213,7 +213,7 @@ class Allen_dataloader_multi_session():
                     val_trials += trials_same_condition[train_size:train_size+val_size]
                     test_trials += trials_same_condition[train_size+val_size:]
             if self.shuffle:
-                train_trials = np.random.shuffle(train_trials)
+                np.random.shuffle(train_trials)
             else:
                 train_trials = np.sort(train_trials)
             
