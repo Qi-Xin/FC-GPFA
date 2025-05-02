@@ -4,6 +4,7 @@ import json
 import os
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime, timedelta
 from VAETransformer_FCGPFA import VAETransformer_FCGPFA, get_K
 import utility_functions as utils
 import GLM
@@ -24,7 +25,8 @@ class Trainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.optimizer = None
-        self.results_file = "training_results.json"
+        self.results_file = "hyperparameter_tuning_results.json"
+        self.model_id = (datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
 
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):
@@ -199,6 +201,7 @@ class Trainer:
             print(f"Start training model with parameters: {self.params}")
         best_test_loss = float('inf')
         best_train_loss = float('inf')
+        best_train_loss_wo_penalty = float('inf')
         no_improve_epoch = 0
         temp_best_model_path = self.path+'/temp_best_model.pth'
         
@@ -223,6 +226,7 @@ class Trainer:
             self.model.train()
             self.model.sample_latent = self.params['sample_latent']
             train_loss = 0.0
+            train_loss_wo_penalty = 0.0
             total_trial = 0
             for batch in tqdm(self.dataloader.train_loader):
                 self.process_batch(batch)
@@ -242,6 +246,7 @@ class Trainer:
                     self.model.sti_logvar, 
                     beta=self.params['beta']
                 )
+                train_loss_wo_penalty += loss.item() * batch["spike_trains"].size(2)
                 loss += self.get_penalty()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -249,6 +254,7 @@ class Trainer:
                 train_loss += loss.item() * batch["spike_trains"].size(2)
                 total_trial += batch["spike_trains"].size(2)
             train_loss /= total_trial
+            train_loss_wo_penalty /= total_trial
 
             self.model.eval()
             self.model.sample_latent = False
@@ -288,6 +294,8 @@ class Trainer:
             if test_loss < best_test_loss - self.params['tol']:
                 no_improve_epoch = 0
                 best_test_loss = test_loss
+                best_train_loss = train_loss
+                best_train_loss_wo_penalty = train_loss_wo_penalty
                 torch.save(self.model.state_dict(), temp_best_model_path)
             else:
                 no_improve_epoch += 1
@@ -301,7 +309,7 @@ class Trainer:
 
         self.model.load_state_dict(torch.load(temp_best_model_path))
         if record_results:
-            self.log_results(best_train_loss, best_test_loss)
+            self.log_results(best_train_loss_wo_penalty, best_train_loss, best_test_loss)
         return best_test_loss
 
     def predict(
@@ -401,12 +409,16 @@ class Trainer:
                         self.params['penalty_diff_loading'] * torch.norm(sti_loading.T @ cp_loading)**2
                     )
         return penalty
-        
-    def save_model_and_hp(self):
-        filename = self.path + '/best_model_and_hp.pth'
+    
+    def save_model_and_hp(self, filename=None, test_loss=None):
+        if filename is None:
+            filename = self.path + '/' + self.model_id + '.pth'
+        else:
+            filename = self.path + '/' + filename + '.pth'
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'params': self.params,
+            'test_loss': test_loss,
         }, filename)
         print(f"Trainer instance (model and hyperparameters) saved to {filename}")
         
@@ -426,11 +438,13 @@ class Trainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Trainer instance (model and hyperparameters) loaded from {filename}")
 
-    def log_results(self, train_loss, test_loss):
+    def log_results(self, best_train_loss_wo_penalty, best_train_loss, best_test_loss):
         results = {
+            "model_id": self.model_id,
             "params": self.params,
-            "train_loss": train_loss,
-            "test_loss": test_loss,
+            "best_train_loss_wo_penalty": best_train_loss_wo_penalty,
+            "best_train_loss": best_train_loss,
+            "best_test_loss": best_test_loss,
         }
         with open(self.results_file, 'a') as file:
             json.dump(results, file, indent=4, sort_keys=False)  # Indent each level by 4 spaces

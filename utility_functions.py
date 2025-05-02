@@ -962,20 +962,24 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
     
     Parameters:
         ax: matplotlib Axes
-        ground_truth, fitted: np.ndarray of shape (n_neurons, n_factors)
+        gt: np.ndarray of shape (n_neurons, n_factors) or None for ground truth
+        ft: np.ndarray of shape (n_neurons, n_factors) for fitted values
         title: title
-        sort: whether to sort neurons by ground truth
+        sort: whether to sort neurons by ground truth (only if gt is provided)
     """
 
-    if sort:
-        sort_idx = np.argsort(gt)
-        gt = gt[sort_idx]
-        ft = ft[sort_idx]
+    neurons = np.arange(len(ft))
+    
+    if gt is not None:
+        if sort:
+            sort_idx = np.argsort(gt)
+            gt = gt[sort_idx]
+            ft = ft[sort_idx]
+            neurons = neurons[sort_idx]
+        # Plot ground truth
+        ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
 
-    neurons = np.arange(len(gt))
-
-    # Plot horizontal scatter
-    ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5,)
+    # Plot fitted values
     ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue')
 
     # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
@@ -983,7 +987,7 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
     ax.set_ylabel(r'Shuffled Neurons', fontsize=6)
     ax.set_xlabel(r'Weight', fontsize=6)
     ax.tick_params(labelsize=6)
-    ax.set_ylim(-1, len(gt))
+    ax.set_ylim(-1, len(ft))
     ax.set_yticks([])
 
     # handles, labels = ax.get_legend_handles_labels()
