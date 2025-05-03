@@ -195,11 +195,16 @@ class Allen_dataloader_multi_session():
             train_trials = []
             val_trials = []
             test_trials = []
-            for trials_same_condition in condition2trials_dict.values():
+            trials_same_condition_list = list(condition2trials_dict.values())
+            for i_trials_same_condition in range(len(trials_same_condition_list)):
                 # Make local indices to global indices
-                trials_same_condition += self.session_trial_indices[i][0]
+                trials_same_condition = (
+                    trials_same_condition_list[i_trials_same_condition].copy()
+                )
+                trials_same_condition = trials_same_condition + self.session_trial_indices[i][0]
                 trials_same_condition = trials_same_condition.tolist()
                 if self.shuffle:
+                # if True:
                     np.random.shuffle(trials_same_condition)
                 ntrials = len(trials_same_condition)
                 if ntrials == 15:
@@ -212,10 +217,9 @@ class Allen_dataloader_multi_session():
                     train_trials += trials_same_condition[:train_size]
                     val_trials += trials_same_condition[train_size:train_size+val_size]
                     test_trials += trials_same_condition[train_size+val_size:]
-            if self.shuffle:
-                np.random.shuffle(train_trials)
-            else:
-                train_trials = np.sort(train_trials)
+
+            # For some unknown reason, the train_trials must be sorted. 
+            train_trials = np.sort(train_trials)
             
             train_batches = self._create_batches(train_trials)
             val_batches = self._create_batches(val_trials)
@@ -226,8 +230,10 @@ class Allen_dataloader_multi_session():
             self.test_batches += test_batches
         
         if self.shuffle:
+        # if True:
             # not like all batches are from session 1 first, then all from session 2, etc.
             np.random.shuffle(self.train_batches)
+
 
 
     def _create_batches(self, indices):
