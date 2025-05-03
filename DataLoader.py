@@ -484,90 +484,90 @@ class Allen_dataset:
             self.npadding = int(self.padding*self.fps)
             self.time_line_padding = np.arange(self.start_time - self.padding, self.end_time, 1/self.fps)
     
-    def get_spike_table(self, selected_presentation_ids):
-        """Optimized spike table generation."""
-        if type(selected_presentation_ids) is not np.ndarray:
-            selected_presentation_ids = np.array(selected_presentation_ids)
-        trial_time_window = [self.start_time - self.padding, self.end_time]
-        presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
-
-        spikes = []
-        for unit_id in self.unit_ids:
-            unit_spike_times = self._session.spike_times[unit_id]
-
-            # Filter spikes once for all selected trials
-            trial_start_times = presentation_start_times[selected_presentation_ids] + trial_time_window[0]
-            trial_end_times = presentation_start_times[selected_presentation_ids] + trial_time_window[1]
-
-            spike_indices = np.searchsorted(unit_spike_times, [trial_start_times.min(), trial_end_times.max()])
-            filtered_spike_times = unit_spike_times[spike_indices[0]:spike_indices[1]]
-
-            # Match spikes to trials
-            trial_indices = np.searchsorted(trial_start_times, filtered_spike_times, side='right') - 1
-            valid_mask = (filtered_spike_times >= trial_start_times[trial_indices]) & \
-                         (filtered_spike_times <= trial_end_times[trial_indices])
-
-            spikes.append(pd.DataFrame({
-                'stimulus_presentation_id': selected_presentation_ids[trial_indices[valid_mask]],
-                'unit_id': unit_id,
-                'spike_time': filtered_spike_times[valid_mask],
-            }))
-
-        spike_df = pd.concat(spikes, ignore_index=True)
-        spike_df['time_since_stimulus_presentation_onset'] = \
-            spike_df['spike_time'] - self.presentation_table.loc[spike_df['stimulus_presentation_id'], 'start_time'].values
-        spike_df.sort_values('spike_time', inplace=True)
-        return spike_df
-    
     # def get_spike_table(self, selected_presentation_ids):
-    #     """
-    #     Return a spike dataframe that includes spikes from [start_time - padding, end_time]
-    #     for the selected trials.
-    #     """
-    #     unit_ids = self.unit_ids
+    #     """Optimized spike table generation."""
+    #     if type(selected_presentation_ids) is not np.ndarray:
+    #         selected_presentation_ids = np.array(selected_presentation_ids)
     #     trial_time_window = [self.start_time - self.padding, self.end_time]
     #     presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
 
-    #     # Map from selected trial index to start and end times
-    #     trial_start_times = presentation_start_times[selected_presentation_ids] + trial_time_window[0]
-    #     trial_end_times = presentation_start_times[selected_presentation_ids] + trial_time_window[1]
-
-    #     # Ensure trials are sorted so searchsorted behaves correctly
-    #     sort_idx = np.argsort(trial_start_times)
-    #     trial_start_times = trial_start_times[sort_idx]
-    #     trial_end_times = trial_end_times[sort_idx]
-    #     selected_presentation_ids = np.array(selected_presentation_ids)[sort_idx]
-
-    #     all_spike_dfs = []
-
-    #     for unit_id in unit_ids:
+    #     spikes = []
+    #     for unit_id in self.unit_ids:
     #         unit_spike_times = self._session.spike_times[unit_id]
 
-    #         # Global spike time window for efficiency
-    #         global_start = trial_start_times.min()
-    #         global_end = trial_end_times.max()
-    #         spike_start_idx = np.searchsorted(unit_spike_times, global_start, side='left')
-    #         spike_end_idx = np.searchsorted(unit_spike_times, global_end, side='right')
-    #         filtered_spike_times = unit_spike_times[spike_start_idx:spike_end_idx]
+    #         # Filter spikes once for all selected trials
+    #         trial_start_times = presentation_start_times[selected_presentation_ids] + trial_time_window[0]
+    #         trial_end_times = presentation_start_times[selected_presentation_ids] + trial_time_window[1]
 
-    #         # Assign each spike to a trial (might be outside trial bounds)
+    #         spike_indices = np.searchsorted(unit_spike_times, [trial_start_times.min(), trial_end_times.max()])
+    #         filtered_spike_times = unit_spike_times[spike_indices[0]:spike_indices[1]]
+
+    #         # Match spikes to trials
     #         trial_indices = np.searchsorted(trial_start_times, filtered_spike_times, side='right') - 1
+    #         valid_mask = (filtered_spike_times >= trial_start_times[trial_indices]) & \
+    #                      (filtered_spike_times <= trial_end_times[trial_indices])
 
-    #         # Guard against negative indices
-    #         valid_mask = (trial_indices >= 0) & \
-    #                     (filtered_spike_times >= trial_start_times[trial_indices]) & \
-    #                     (filtered_spike_times <= trial_end_times[trial_indices])
-
-    #         spike_df = pd.DataFrame({
+    #         spikes.append(pd.DataFrame({
     #             'stimulus_presentation_id': selected_presentation_ids[trial_indices[valid_mask]],
-    #             'time_since_stimulus_presentation_onset':
-    #                 filtered_spike_times[valid_mask] - trial_start_times[trial_indices[valid_mask]],
-    #             'unit_id': unit_id
-    #         })
+    #             'unit_id': unit_id,
+    #             'spike_time': filtered_spike_times[valid_mask],
+    #         }))
 
-    #         all_spike_dfs.append(spike_df)
+    #     spike_df = pd.concat(spikes, ignore_index=True)
+    #     spike_df['time_since_stimulus_presentation_onset'] = \
+    #         spike_df['spike_time'] - self.presentation_table.loc[spike_df['stimulus_presentation_id'], 'start_time'].values
+    #     spike_df.sort_values('spike_time', inplace=True)
+    #     return spike_df
+    
+    def get_spike_table(self, selected_presentation_ids):
+        """
+        Return a spike dataframe that includes spikes from [start_time - padding, end_time]
+        for the selected trials.
+        """
+        unit_ids = self.unit_ids
+        trial_time_window = [self.start_time - self.padding, self.end_time]
+        presentation_start_times = np.array(self.presentation_table.loc[self.presentation_ids]['start_time'])
 
-    #     return pd.concat(all_spike_dfs, ignore_index=True)
+        # Map from selected trial index to start and end times
+        trial_start_times = presentation_start_times[selected_presentation_ids] + trial_time_window[0]
+        trial_end_times = presentation_start_times[selected_presentation_ids] + trial_time_window[1]
+
+        # Ensure trials are sorted so searchsorted behaves correctly
+        sort_idx = np.argsort(trial_start_times)
+        trial_start_times = trial_start_times[sort_idx]
+        trial_end_times = trial_end_times[sort_idx]
+        selected_presentation_ids = np.array(selected_presentation_ids)[sort_idx]
+
+        all_spike_dfs = []
+
+        for unit_id in unit_ids:
+            unit_spike_times = self._session.spike_times[unit_id]
+
+            # Global spike time window for efficiency
+            global_start = trial_start_times.min()
+            global_end = trial_end_times.max()
+            spike_start_idx = np.searchsorted(unit_spike_times, global_start, side='left')
+            spike_end_idx = np.searchsorted(unit_spike_times, global_end, side='right')
+            filtered_spike_times = unit_spike_times[spike_start_idx:spike_end_idx]
+
+            # Assign each spike to a trial (might be outside trial bounds)
+            trial_indices = np.searchsorted(trial_start_times, filtered_spike_times, side='right') - 1
+
+            # Guard against negative indices
+            valid_mask = (trial_indices >= 0) & \
+                        (filtered_spike_times >= trial_start_times[trial_indices]) & \
+                        (filtered_spike_times <= trial_end_times[trial_indices])
+
+            spike_df = pd.DataFrame({
+                'stimulus_presentation_id': selected_presentation_ids[trial_indices[valid_mask]],
+                'time_since_stimulus_presentation_onset':
+                    filtered_spike_times[valid_mask] - trial_start_times[trial_indices[valid_mask]],
+                'unit_id': unit_id
+            })
+
+            all_spike_dfs.append(spike_df)
+
+        return pd.concat(all_spike_dfs, ignore_index=True)
 
     
     def get_trial_spike_trains(self, selected_trials=None, dt=None):
