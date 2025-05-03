@@ -387,6 +387,21 @@ class Trainer:
                                 self.model.current_session_id
                             ][iarea][jarea].norm(dim=1).mean()
                     )
+        if self.params['penalty_loading_similarity'] is not None:
+            for iarea in range(self.narea):
+                for jarea in range(self.narea):
+                    penalty += (
+                        self.params['penalty_loading_similarity'] \
+                            * self.model.cp_weight_receiving_dict[
+                                self.model.current_session_id
+                            ][iarea][jarea].var()
+                    )
+                    penalty += (
+                        self.params['penalty_loading_similarity'] \
+                            * self.model.cp_weight_sending_dict[
+                                self.model.current_session_id
+                            ][iarea][jarea].var()
+                    )
         if self.params['penalty_smoothing_spline'] is not None:
             if self.model.factors.dim() == 3:
                 second_diff = torch.einsum('atf,dt->adf', self.model.factors, self.D)
