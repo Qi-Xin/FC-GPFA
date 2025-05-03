@@ -219,11 +219,11 @@ class Allen_dataloader_multi_session():
 
             ### Making trials in a batch next to each other can shorten the search time 
             ### for faster converting spike times to spike trains.
-            if self.shuffle:
-                np.random.shuffle(train_trials)
-            # train_trials = np.sort(train_trials)
-            # val_trials = np.sort(val_trials)
-            # test_trials = np.sort(test_trials)
+            # if self.shuffle:
+            #     np.random.shuffle(train_trials)
+            train_trials = np.sort(train_trials)
+            val_trials = np.sort(val_trials)
+            test_trials = np.sort(test_trials)
             
             train_batches = self._create_batches(train_trials)
             val_batches = self._create_batches(val_trials)
