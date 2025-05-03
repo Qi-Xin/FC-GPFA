@@ -228,6 +228,7 @@ class Trainer:
             train_loss = 0.0
             train_loss_wo_penalty = 0.0
             total_trial = 0
+            mean_firing_rate = 0.0
             for batch in tqdm(self.dataloader.train_loader):
                 self.process_batch(batch)
                 self.optimizer.zero_grad()
@@ -253,8 +254,11 @@ class Trainer:
                 self.optimizer.step()
                 train_loss += loss.item() * batch["spike_trains"].size(2)
                 total_trial += batch["spike_trains"].size(2)
+                mean_firing_rate += batch["spike_trains"].mean()*batch["spike_trains"].size(2)
             train_loss /= total_trial
             train_loss_wo_penalty /= total_trial
+            mean_firing_rate /= total_trial
+            print(f"Mean firing rate: {mean_firing_rate:.4f}")
 
             self.model.eval()
             self.model.sample_latent = False
