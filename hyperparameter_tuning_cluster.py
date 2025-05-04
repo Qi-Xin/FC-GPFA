@@ -16,9 +16,10 @@ if sys.platform == 'linux':
         path_prefix = '/home'
     elif hostname[:6] == "wright":
         path_prefix = '/home/export'
-    elif hostname in ["n01", "n02", "n03"]:
+    elif hostname[:3] in ["n01", "n02", "n03"]:
         path_prefix = '/home/export'
     else:
+        print("n02"==hostname[:3])
         raise ValueError(f"Unknown host: {hostname}")
     data_path = path_prefix + '/qix/user_data/allen_spike_trains/single_sessions.joblib'
     ckp_path = path_prefix + '/qix/user_data/VAETransformer_checkpoint_hp_tuning_cluster'
