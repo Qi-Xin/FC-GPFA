@@ -4,9 +4,9 @@
 #SBATCH --error=hyperopt_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:8
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=2
+#SBATCH --gres=gpu:6
+#SBATCH --mem=32G
 #SBATCH --time=1:00:00
 
 # Activate conda environment

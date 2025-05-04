@@ -27,10 +27,12 @@ class Trainer:
         self.model = None
         self.optimizer = None
         self.results_file = "hyperparameter_tuning_results.json"
+        hostname = socket.gethostname().split('.')[0]
         self.model_id = (
-            socket.gethostname().split('.')[0] + "_" + str(self.dataloader.session_ids) \
+            hostname + "_" + str(self.dataloader.session_ids) \
                 +"_"+(datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
         )
+        self.temp_best_model_path = self.path+'/temp_best_model'+hostname+'.pth'
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):
             self.dataloader.change_batch_size(self.params['batch_size'])
@@ -206,8 +208,7 @@ class Trainer:
         best_train_loss = float('inf')
         best_train_loss_wo_penalty = float('inf')
         no_improve_epoch = 0
-        hostname = socket.gethostname().split('.')[0]
-        temp_best_model_path = self.path+'/temp_best_model'+hostname+'.pth'
+
         
         # Function to adjust learning rate
         def adjust_lr(optimizer, epoch):
@@ -301,7 +302,7 @@ class Trainer:
                 best_test_loss = test_loss
                 best_train_loss = train_loss
                 best_train_loss_wo_penalty = train_loss_wo_penalty
-                torch.save(self.model.state_dict(), temp_best_model_path)
+                torch.save(self.model.state_dict(), self.temp_best_model_path)
             else:
                 no_improve_epoch += 1
                 if verbose:
@@ -312,7 +313,7 @@ class Trainer:
                         print('Early stopping triggered.')
                     break
 
-        self.model.load_state_dict(torch.load(temp_best_model_path))
+        self.model.load_state_dict(torch.load(self.temp_best_model_path))
         if record_results:
             self.log_results(best_train_loss_wo_penalty, best_train_loss, best_test_loss)
         return best_test_loss
