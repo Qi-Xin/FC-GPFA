@@ -975,7 +975,6 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             sort_idx = np.argsort(gt)
             gt = gt[sort_idx]
             ft = ft[sort_idx]
-            neurons = neurons[sort_idx]
         # Plot ground truth
         ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
 
