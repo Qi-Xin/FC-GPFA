@@ -7,11 +7,27 @@ from model_trainer import Trainer
 import joblib
 import sys
 
+# Parse command line arguments for dataset selection
+import argparse
+
+parser = argparse.ArgumentParser(description='Run hyperparameter tuning with selected dataset')
+parser.add_argument('--dataset', type=str, choices=['single', 'two', 'all'], required=True,
+                   help='Dataset to use: "single" for single_sessions or "two" for two_sessions')
+args = parser.parse_args()
+
+# Map command line arg to dataset filename
+dataset_map = {
+    'single': 'single_sessions.joblib',
+    'two': 'two_sessions.joblib',
+    'all': 'all_six_probes_sessions.joblib'
+}
+
+# Will be used to modify data_path below
+selected_dataset = dataset_map[args.dataset]
+
 # Load from toy dataloader with two sessions
 if sys.platform == 'linux':
-    data_path = '/qix/user_data/allen_spike_trains/single_sessions.joblib'
-    # data_path = '/qix/user_data/allen_spike_trains/two_sessions.joblib'
-    # data_path = '/qix/user_data/allen_spike_trains/all_six_probes_sessions.joblib'
+    data_path = '/qix/user_data/allen_spike_trains/' + selected_dataset
     ckp_path = '/qix/user_data/VAETransformer_checkpoint_hp_tuning'
     hostname = socket.gethostname()
     if hostname[:8] == "ghidorah":
@@ -25,9 +41,7 @@ if sys.platform == 'linux':
     ckp_path = prefix +  ckp_path
     data_path = prefix + data_path
 else:
-    data_path = 'D:/ecephys_cache_dir/single_sessions.joblib'
-    # data_path = 'D:/ecephys_cache_dir/two_sessions.joblib'
-    # data_path = 'D:/ecephys_cache_dir/all_six_probes_sessions.joblib'
+    data_path = 'D:/user_data/allen_spike_trains/' + selected_dataset
     ckp_path = 'D:/user_data/VAETransformer_checkpoint_hp_tuning'
 data_to_use = joblib.load(data_path)
 
