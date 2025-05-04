@@ -16,6 +16,7 @@ from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProj
 from collections import defaultdict
 from tqdm import tqdm
 import torch
+import socket
 
 
 class BatchIterator:
@@ -417,7 +418,16 @@ class Allen_dataset:
         assert set(self.selected_probes).issubset(['probeA', 'probeB', 'probeC', 'probeD', 'probeE', 'probeF']) 
         
         if sys.platform == 'linux':
-            self.manifest_path = os.path.join('/home/qix/ecephys_cache_dir/', "manifest.json")
+            hostname = socket.gethostname()
+            if hostname[:8] == "ghidorah":
+                path_prefix = '/home'
+            elif hostname[:6] == "wright":
+                path_prefix = '/home/export'
+            elif hostname[:3] in ["n01", "n02", "n03"]:
+                path_prefix = '/home/export'
+            else:
+                raise ValueError(f"Unknown host: {hostname}")
+            self.manifest_path = os.path.join(path_prefix+'/qix/ecephys_cache_dir/', "manifest.json")
         elif sys.platform == 'win32' or 'darwin':
             self.manifest_path = os.path.join('D:/ecephys_cache_dir/', "manifest.json")
         else:
