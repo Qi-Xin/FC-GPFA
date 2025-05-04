@@ -17,4 +17,4 @@ conda activate allen
 cd ~/FC-GPFA
 
 # Run the parallel hyperparameter search
-python parallel_hyperopt.py
+python hyperparameter_tuning_cluster.py
