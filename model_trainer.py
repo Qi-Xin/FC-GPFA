@@ -27,8 +27,10 @@ class Trainer:
         self.model = None
         self.optimizer = None
         self.results_file = "hyperparameter_tuning_results.json"
-        self.model_id = socket.gethostname()+"_" + str(self.dataloader.session_ids) +"_"+(datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
-
+        self.model_id = (
+            socket.gethostname().split('.')[0] + "_" + str(self.dataloader.session_ids) \
+                +"_"+(datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
+        )
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):
             self.dataloader.change_batch_size(self.params['batch_size'])
@@ -204,7 +206,7 @@ class Trainer:
         best_train_loss = float('inf')
         best_train_loss_wo_penalty = float('inf')
         no_improve_epoch = 0
-        hostname = socket.gethostname()
+        hostname = socket.gethostname().split('.')[0]
         temp_best_model_path = self.path+'/temp_best_model'+hostname+'.pth'
         
         # Function to adjust learning rate
