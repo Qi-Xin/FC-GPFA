@@ -19,7 +19,6 @@ if sys.platform == 'linux':
     elif hostname[:3] in ["n01", "n02", "n03"]:
         path_prefix = '/home/export'
     else:
-        print("n02"==hostname[:3])
         raise ValueError(f"Unknown host: {hostname}")
     data_path = path_prefix + '/qix/user_data/allen_spike_trains/single_sessions.joblib'
     ckp_path = path_prefix + '/qix/user_data/VAETransformer_checkpoint_hp_tuning_cluster'
@@ -105,7 +104,7 @@ def run_parallel_trials(n_trials, gpu_ids):
     from hyperopt import rand, space_eval
 
     def run_single_trial(i):
-        params = space_eval(param_dist, {k: rand.suggest(new_id=k, domain=v) for k, v in param_dist.items()})
+        params = space_eval(param_dist, {k: rand.suggest(k, v) for k, v in param_dist.items()})
         gpu_id = gpu_ids[i % len(gpu_ids)]
         return try_hp_on_gpu(params, gpu_id)
 
