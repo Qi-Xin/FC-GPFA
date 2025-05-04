@@ -204,7 +204,8 @@ class Trainer:
         best_train_loss = float('inf')
         best_train_loss_wo_penalty = float('inf')
         no_improve_epoch = 0
-        temp_best_model_path = self.path+'/temp_best_model.pth'
+        hostname = socket.gethostname()
+        temp_best_model_path = self.path+'/temp_best_model'+hostname+'.pth'
         
         # Function to adjust learning rate
         def adjust_lr(optimizer, epoch):
@@ -220,7 +221,7 @@ class Trainer:
                     self.params['lr_cp']*(epoch+1)/self.params['epoch_warm_up']
         
         ### Training and Testing Loops
-        for epoch in range(self.params['epoch_max']):
+        for epoch in tqdm(range(self.params['epoch_max']), disable=verbose):
             # Warm up
             if epoch < self.params['epoch_warm_up']:
                 adjust_lr(self.optimizer, epoch)
@@ -229,7 +230,7 @@ class Trainer:
             train_loss = 0.0
             train_loss_wo_penalty = 0.0
             total_trial = 0
-            for batch in tqdm(self.dataloader.train_loader):
+            for batch in tqdm(self.dataloader.train_loader, disable=not verbose):
                 self.process_batch(batch)
                 self.optimizer.zero_grad()
                 firing_rate = self.model(
@@ -263,7 +264,7 @@ class Trainer:
             test_loss = 0.0
             total_trial = 0
             with torch.no_grad():
-                for batch in tqdm(self.dataloader.val_loader):
+                for batch in tqdm(self.dataloader.val_loader, disable=not verbose):
                     self.process_batch(batch)
                     firing_rate = self.model(
                         batch,
