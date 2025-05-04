@@ -6,6 +6,7 @@ import socket
 import pickle
 import sys
 from hyperopt import fmin, tpe, hp, STATUS_OK, STATUS_FAIL
+from hyperopt.pyll.stochastic import sample
 from model_trainer import Trainer
 import utility_functions as utils
 
@@ -104,7 +105,7 @@ def run_parallel_trials(n_trials, gpu_ids):
     from hyperopt import rand, space_eval
 
     def run_single_trial(i):
-        params = space_eval(param_dist, {k: rand.suggest(k, v) for k, v in param_dist.items()})
+        params = sample(param_dist)
         gpu_id = gpu_ids[i % len(gpu_ids)]
         return try_hp_on_gpu(params, gpu_id)
 
