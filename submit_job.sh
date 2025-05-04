@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:8
 #SBATCH --mem=64G
-#SBATCH --time=24:00:00
+#SBATCH --time=1:00:00
 #SBATCH --partition=statds_co
 
 # Activate conda environment
