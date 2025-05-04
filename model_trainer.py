@@ -10,6 +10,7 @@ import utility_functions as utils
 import GLM
 import matplotlib.pyplot as plt
 from DataLoader import Allen_dataloader_multi_session, Simple_dataloader_from_spikes
+import socket
 '''
 First, load data "spikes", set path, set hyperparameters, and use these three to create a Trainer object.
 Then, call the trainer.train() method to train the model, which use early stop. 
@@ -465,3 +466,10 @@ class Trainer:
         with open(self.results_file, 'a') as file:
             json.dump(results, file, indent=4, sort_keys=False)  # Indent each level by 4 spaces
             file.write('\n')  # Write a newline after each set of results
+        # If running on cluster, save the results again to a different file
+        hostname = socket.gethostname()
+        if hostname[:3] == "n01":
+            path_prefix = '/home/export'
+            with open(path_prefix+self.results_file, 'a') as file:
+                json.dump(results, file, indent=4, sort_keys=False)  # Indent each level by 4 spaces
+                file.write('\n')  # Write a newline after each set of results

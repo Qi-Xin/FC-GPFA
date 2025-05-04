@@ -1,7 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=FC-GPFA       # Job name
-#SBATCH --nodes=1                      # Run all processes on a single node
-#SBATCH --ntasks=1                     # Run a single task
-#SBATCH --output=python_job_%j.log     # Standard output and error log
+#SBATCH --job-name=hyperopt_parallel
+#SBATCH --output=hyperopt_%j.out
+#SBATCH --error=hyperopt_%j.err
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:8
+#SBATCH --mem=64G
+#SBATCH --time=24:00:00
+#SBATCH --partition=gpu
 
-python hyperparameter_tuning.py                  # Run the python script
+# Activate conda environment
+source ~/.bashrc
+conda activate allen
+
+# Change to your working directory
+cd ~/FC-GPFA
+
+# Run the parallel hyperparameter search
+python parallel_hyperopt.py
