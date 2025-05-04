@@ -17,7 +17,7 @@ else:
     # data_path = 'D:/ecephys_cache_dir/two_sessions.joblib'
     # data_path = 'D:/ecephys_cache_dir/all_six_probes_sessions.joblib'
 data_to_use = joblib.load(data_path)
-ckp_path = '/home/qix/user_data/VAETransformer_checkpoint'
+ckp_path = '/home/qix/user_data/VAETransformer_checkpoint_hp_tuning'
 
 # score below is actually the best test loss achieve when training the model, so the lower the better
 best_score = [float('inf')]
