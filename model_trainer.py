@@ -27,7 +27,7 @@ class Trainer:
         self.model = None
         self.optimizer = None
         self.results_file = "hyperparameter_tuning_results.json"
-        self.model_id = (datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
+        self.model_id = socket.gethostname()+"_"+(datetime.now() - timedelta(hours=4)).strftime('%Y%m%d_%H%M%S')
 
         ### Change batch size
         if hasattr(self.dataloader, 'change_batch_size'):

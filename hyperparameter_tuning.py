@@ -9,15 +9,28 @@ import sys
 
 # Load from toy dataloader with two sessions
 if sys.platform == 'linux':
-    data_path = '/home/qix/user_data/allen_spike_trains/single_sessions.joblib'
-    # data_path = '/home/qix/user_data/allen_spike_trains/two_sessions.joblib'
-    # data_path = '/home/qix/user_data/allen_spike_trains/all_six_probes_sessions.joblib'
+    data_path = '/qix/user_data/allen_spike_trains/single_sessions.joblib'
+    # data_path = '/qix/user_data/allen_spike_trains/two_sessions.joblib'
+    # data_path = '/qix/user_data/allen_spike_trains/all_six_probes_sessions.joblib'
+    ckp_path = '/qix/user_data/VAETransformer_checkpoint_hp_tuning'
+    hostname = socket.gethostname()
+    if hostname[:8] == "ghidorah":
+        prefix = '/home'
+    elif hostname[:6] == "wright":
+        prefix = '/home/export'
+    elif hostname[:3] in ["n01", "n02", "n03"]:
+        prefix = '/home/export'
+    else:
+        raise ValueError(f"Unknown host: {hostname}")
+    ckp_path = prefix +  ckp_path
+    data_path = prefix + data_path
 else:
     data_path = 'D:/ecephys_cache_dir/single_sessions.joblib'
     # data_path = 'D:/ecephys_cache_dir/two_sessions.joblib'
     # data_path = 'D:/ecephys_cache_dir/all_six_probes_sessions.joblib'
+    ckp_path = 'D:/user_data/VAETransformer_checkpoint_hp_tuning'
 data_to_use = joblib.load(data_path)
-ckp_path = '/home/qix/user_data/VAETransformer_checkpoint_hp_tuning'
+
 
 # score below is actually the best test loss achieve when training the model, so the lower the better
 best_score = [float('inf')]
