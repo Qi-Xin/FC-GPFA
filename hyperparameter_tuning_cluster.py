@@ -27,7 +27,22 @@ else:
     data_path = 'D:/ecephys_cache_dir/single_sessions.joblib'
     ckp_path = 'D:/ecephys_cache_dir/VAETransformer_checkpoint_hp_tuning'
 
-data_to_use = joblib.load(data_path)
+if sys.platform == 'linux' and hostname[:3] in ["n01", "n02", "n03"]:
+    session_ids = [757216464]
+    kwargs = {
+        'shuffle':True,
+        'align_stimulus_onset':True,
+        'merge_trials':True,
+        'batch_size':64,
+        'fps':500,
+        'start_time':0.0,
+        'end_time':0.4,
+        'padding':0.1,
+        'selected_probes':['probeA', 'probeB', 'probeC', 'probeD', 'probeE', 'probeF'],
+    }
+    data_to_use = Allen_dataloader_multi_session(session_ids, **kwargs)
+else:
+    data_to_use = joblib.load(data_path)
 
 # Global best score holder
 best_score = [float('inf')]
