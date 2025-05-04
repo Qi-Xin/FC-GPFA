@@ -376,8 +376,6 @@ class Trainer:
         if self.params['penalty_coupling_subgroup'] is not None:
             for iarea in range(self.narea):
                 for jarea in range(self.narea):
-                    if iarea == jarea:
-                        continue
                     penalty += (
                         self.params['penalty_coupling_subgroup'] \
                             * self.model.cp_weight_receiving_dict[
