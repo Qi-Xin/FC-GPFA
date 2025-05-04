@@ -561,7 +561,7 @@ class Allen_dataset:
             spike_df = pd.DataFrame({
                 'stimulus_presentation_id': selected_presentation_ids[trial_indices[valid_mask]],
                 'time_since_stimulus_presentation_onset':
-                    filtered_spike_times[valid_mask] - trial_start_times[trial_indices[valid_mask]],
+                    filtered_spike_times[valid_mask] - trial_start_times[trial_indices[valid_mask]] - self.padding,
                 'time': filtered_spike_times[valid_mask],
                 'unit_id': unit_id
             })
