@@ -16,7 +16,7 @@ if sys.platform == 'linux':
         path_prefix = '/home'
     elif hostname[:6] == "wright":
         path_prefix = '/home/export'
-    elif hostname[:3] in ["n01", "n02", "n03"]:
+    elif hostname in ["n01", "n02", "n03"]:
         path_prefix = '/home/export'
     else:
         raise ValueError(f"Unknown host: {hostname}")

@@ -11,6 +11,7 @@
 
 # Activate conda environment
 source ~/.bashrc
+conda init
 conda activate allen
 
 # Change to your working directory

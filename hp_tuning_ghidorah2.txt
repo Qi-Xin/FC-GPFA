@@ -6,4 +6,5 @@
   0%|          | 0/500 [1:08:56<?, ?trial/s, best loss=?]                                                         Trainer instance (model and hyperparameters) saved to /home/qix/user_data/VAETransformer_checkpoint_hp_tuning/20250503_213052.pth
   0%|          | 0/500 [1:08:57<?, ?trial/s, best loss=?]  0%|          | 1/500 [1:08:57<573:29:26, 4137.41s/trial, best loss: 0.06157906243924103]                                                                                          Total sessions: 1, Batch size: 128, Train set size: 66, Val set size: 10, Test set size: 20
   0%|          | 1/500 [1:08:57<573:29:26, 4137.41s/trial, best loss: 0.06157906243924103]                                                                                          Model initialized. Training on cuda
-  0%|          | 1/500 [1:08:58<573:29:26, 4137.41s/trial, best loss: 0.06157906243924103]
+  0%|          | 1/500 [1:08:58<573:29:26, 4137.41s/trial, best loss: 0.06157906243924103]  0%|          | 0/500 [00:00<?, ?trial/s, best loss=?]                                                       Total sessions: 1, Batch size: 64, Train set size: 132, Val set size: 20, Test set size: 39
+  0%|          | 0/500 [00:00<?, ?trial/s, best loss=?]
