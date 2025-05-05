@@ -119,14 +119,14 @@ param_dist = {
     # Transformer VAE settings
     'downsample_factor': hp.choice('downsample_factor', [5, 10]),
     'transformer_num_layers': hp.choice('transformer_num_layers', [1, 2, 4]),
-    'transformer_d_model': hp.choice('transformer_d_model', [64, 128, 256]),
+    'transformer_d_model': hp.choice('transformer_d_model', [128, 256, 512]),
     'transformer_dim_feedforward': hp.choice('transformer_dim_feedforward', [256, 512, 1024]),
     'transformer_vae_output_dim': hp.choice('transformer_vae_output_dim', [12, 24, 48, 96]),
-    'transformer_dropout': hp.choice('transformer_dropout', [0.0, 0.2]),
-    'transformer_nhead': hp.choice('transformer_nhead', [1, 2, 4]),
+    'transformer_dropout': hp.choice('transformer_dropout', [0.0, 0.2, 0.4]),
+    'transformer_nhead': hp.choice('transformer_nhead', [1, 2]),
 
     # Stimulus decoder
-    'stimulus_nfactor': hp.choice('stimulus_nfactor', [1, 2, 4]),
+    'stimulus_nfactor': hp.choice('stimulus_nfactor', [1, 2]),
     'stimulus_decoder_inter_dim_factor': hp.choice('stimulus_decoder_inter_dim_factor', [1, 2, 4]),
 
     # VAE loss
@@ -154,10 +154,10 @@ param_dist = {
     'self_history_basis_nonlinear': hp.choice('self_history_basis_nonlinear', [1]),
 
     # Penalties
-    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [1e2, 1e3, 1e4]),
-    'penalty_coupling_subgroup': hp.choice('penalty_coupling_subgroup', [1e-6, 1e-5, 1e-4, 1e-3]),
+    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [1e1, 1e2, 1e3]),
+    'penalty_coupling_subgroup': hp.choice('penalty_coupling_subgroup', [1e-5, 1e-4, 1e-3, 1e-2]),
     'penalty_diff_loading': hp.choice('penalty_diff_loading', [None]),
-    'penalty_loading_similarity': hp.choice('penalty_loading_similarity', [1e-5, 1e-4, 1e-3, 1e-2]),
+    'penalty_loading_similarity': hp.choice('penalty_loading_similarity', [1e-4, 1e-3, 1e-2, 1e-1]),
 
     # Training settings
     'batch_size': hp.choice('batch_size', [32, 64, 128]),
@@ -171,7 +171,7 @@ param_dist = {
     'epoch_patience': hp.choice('epoch_patience', [3]),
     'epoch_max': hp.choice('epoch_max', [50]),
     'tol': hp.choice('tol', [1e-5]),
-    'weight_decay': hp.choice('weight_decay', [0.0, 1e-5, 1e-4, 1e-3]),
+    'weight_decay': hp.choice('weight_decay', [0.0]),
 }
 
 
