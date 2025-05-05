@@ -38,6 +38,8 @@ from torch.nn import functional as F
 import torch.optim as optim
 
 
+from scipy.linalg import svd
+from sklearn.linear_model import LinearRegression
 #%% Define the linear model
 
 
@@ -2558,6 +2560,7 @@ def EIF_simulator(
         params = {},
         nneuron_coupling=None,
         shared_background=0.0,
+        no_stimulus=False,
         return_I_ext=False,
         return_trial_info=False,
         return_I_syn=False,
@@ -2615,8 +2618,9 @@ def EIF_simulator(
     getI_real_data(target, dt, nt, npadding, EIF_params["LM_template"])
 
     I_ext = 0.0*np.ones((nt_tot, nneuron, ntrial))
-    I_ext[:,:nneuron_part,:] = np.repeat(source["I"][:,np.newaxis,:],nneuron_part, axis=1)
-    I_ext[:,nneuron_part:,:] = np.repeat(target["I"][:,np.newaxis,:],nneuron_part, axis=1)
+    if not no_stimulus:
+        I_ext[:,:nneuron_part,:] = np.repeat(source["I"][:,np.newaxis,:],nneuron_part, axis=1)
+        I_ext[:,nneuron_part:,:] = np.repeat(target["I"][:,np.newaxis,:],nneuron_part, axis=1)
 
     trial_info_slope, trial_info_gain = None, None
     ### Getting the external input after some background slope is added
@@ -3069,3 +3073,40 @@ def get_ps_three_models(ntimes=10, std1=0.0, corr1=0.0, std2=0.0, corr2=0.0, ntr
             result_pop.append(result_pop_temp)
             result_pop_nowarp.append(result_pop_temp_nowarp)
     return result, result_pop, result_pop_nowarp
+
+
+def reduced_rank_regression(X, Y, r):
+    # Center the data
+    Y_mean = np.repeat(Y.mean(axis=2)[:,:,None], Y.shape[2], axis=2)
+    X -= X.mean(axis=2)[:,:,None]
+    Y -= Y.mean(axis=2)[:,:,None]
+
+    # Flatten X and Y along the first and third dimensions
+    nt, n_features, ntrial = X.shape
+    _, n_outputs, _ = Y.shape
+    
+    X_flat = X.transpose(2, 0, 1).reshape(-1, n_features)
+    Y_flat = Y.transpose(2, 0, 1).reshape(-1, n_outputs)
+    Y_mean_flat = Y_mean.transpose(2, 0, 1).reshape(-1, n_outputs)
+
+    X, Y = X_flat, Y_flat
+    n_samples, n_features = X.shape
+    n_outputs = Y.shape[1]
+
+    # Fit the Reduced Rank Regression Model
+    linreg = LinearRegression().fit(X, Y)
+    B_OLS = linreg.coef_.T
+
+    # Perform SVD and construct the reduced rank coefficient matrix
+    U, D, Vt = svd(B_OLS, full_matrices=False)
+    U_r = U[:, :r]
+    D_r = D[:r]
+    Vt_r = Vt[:r, :]
+    B_rrr = U_r @ np.diag(D_r) @ Vt_r
+
+    # Make predictions and compute RSS for the Reduced Rank Model
+    Y_pred = X @ B_rrr + Y_mean_flat
+    total_variance = np.mean(Y_pred ** 2)
+    variance_wo_coupling = np.mean(Y_mean_flat ** 2)
+    coupling_percentage = (total_variance - variance_wo_coupling) / total_variance
+    return coupling_percentage
