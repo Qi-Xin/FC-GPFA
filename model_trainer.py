@@ -444,7 +444,7 @@ class Trainer:
     def load_model_and_hp(self, filename=None):
         if filename is None:
             print(f"Loading default model from {self.path}")
-            filename = self.path + '/best_model_and_hp.pth'
+            filename = self.path
         # checkpoint = torch.load(filename)
         
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

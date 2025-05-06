@@ -977,9 +977,17 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             ft = ft[sort_idx]
         # Plot ground truth
         ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
-
-    # Plot fitted values
-    ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue')
+        # Plot fitted values
+        ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue')
+    else:
+        colors = plt.cm.tab10.colors
+        if ft.ndim == 1:
+            ft = ft[:,None]
+        if sort:
+            sort_idx = np.argsort(ft[:,0])
+            ft = ft[sort_idx, :]
+        for i in range(ft.shape[1]):
+            ax.scatter(ft[:,i], neurons, alpha=0.5, marker='s', s=6, label=f'Fitted {i}', edgecolors='none', color=colors[i])
 
     # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
     ax.set_title(title, fontsize=7)
