@@ -939,14 +939,17 @@ def loss_function_per_trial(log_firing_rate, spikes):
     return poisson_loss
 
 
-def find_middle_fit_trial(firing_rate_test, spike_train_test):
+def find_middle_fit_trial(firing_rate_test, spike_train_test, left_and_right_trials=0):
     # nt x nneuron x ntrial
     loss_per_trial = loss_function_per_trial(
         firing_rate_test, 
         spike_train_test,
     )
 
-    middle_fit_trial_idx = torch.argsort(loss_per_trial)[len(loss_per_trial)//2].item()
+    middle_fit_trial_idx = torch.argsort(loss_per_trial)[
+        len(loss_per_trial)//2 - left_and_right_trials:
+        len(loss_per_trial)//2 + left_and_right_trials
+    ].numpy()
     return middle_fit_trial_idx
 
 
