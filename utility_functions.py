@@ -948,7 +948,7 @@ def find_middle_fit_trial(firing_rate_test, spike_train_test, left_and_right_tri
 
     middle_fit_trial_idx = torch.argsort(loss_per_trial)[
         len(loss_per_trial)//2 - left_and_right_trials:
-        len(loss_per_trial)//2 + left_and_right_trials
+        len(loss_per_trial)//2 + left_and_right_trials+1
     ].numpy()
     return middle_fit_trial_idx
 
