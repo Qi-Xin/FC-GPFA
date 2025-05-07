@@ -981,7 +981,7 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
         # Plot ground truth
         ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
         # Plot fitted values
-        ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue')
+        ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue', alpha=0.8)
     else:
         colors = plt.cm.tab10.colors
         if ft.ndim == 1:
