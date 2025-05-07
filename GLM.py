@@ -3106,7 +3106,7 @@ def reduced_rank_regression(X, Y, r):
 
     # Make predictions and compute RSS for the Reduced Rank Model
     Y_pred = X @ B_rrr + Y_mean_flat
-    total_variance = np.mean(Y_pred ** 2)
-    variance_wo_coupling = np.mean(Y_mean_flat ** 2)
+    total_variance = np.var(Y_pred)
+    variance_wo_coupling = np.var(Y_mean_flat)
     coupling_percentage = (total_variance - variance_wo_coupling) / total_variance
     return coupling_percentage
