@@ -67,13 +67,25 @@ class VAETransformer_FCGPFA(nn.Module):
         ### VAETransformer's parameters
         # self.cls_token = nn.Parameter(torch.randn(1, 1, self.transformer_d_model))
         self.token_converter_dict = nn.ModuleDict()
-        transformer_encoder_layer = TransformerEncoderLayer(d_model=self.transformer_d_model, 
-                                                            nhead=self.transformer_nhead,
-                                                            dim_feedforward=self.transformer_dim_feedforward, 
-                                                            activation='gelu',
-                                                            dropout=self.transformer_dropout,
-                                                            batch_first=True)
-        self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=transformer_num_layers)
+        self.RNN = False
+        if self.RNN == False:
+            transformer_encoder_layer = TransformerEncoderLayer(d_model=self.transformer_d_model, 
+                                                                nhead=self.transformer_nhead,
+                                                                dim_feedforward=self.transformer_dim_feedforward, 
+                                                                activation='gelu',
+                                                                dropout=self.transformer_dropout,
+                                                                batch_first=True)
+            self.transformer_encoder = TransformerEncoder(transformer_encoder_layer, num_layers=transformer_num_layers)
+        else:
+            self.transformer_encoder = nn.GRU(
+                input_size=self.transformer_d_model,  # same as d_model
+                hidden_size=self.transformer_d_model // 2,  # to match output dim if bidirectional
+                num_layers=self.transformer_num_layers,
+                batch_first=True,
+                dropout=self.transformer_dropout if self.transformer_num_layers > 1 else 0,
+                bidirectional=True
+            )
+
         # Output mu and log-variance for each dimension
         if self.use_area_specific_encoder:
             assert self.transformer_vae_output_dim % self.narea == 0, 'transformer_vae_output_dim must be divisible by narea'
@@ -437,7 +449,10 @@ class VAETransformer_FCGPFA(nn.Module):
                     cls_tokens = self.cls_token.expand(-1, token_seq.shape[1], -1)  # Expand CLS to batch size
                     token_seq = torch.cat((cls_tokens, token_seq), dim=0)  # Concatenate CLS token
                 token_seq = self.positional_encoding(token_seq)  # Apply positional encoding
-                encoded = self.transformer_encoder(token_seq) # Put it through the transformer encoder
+                if self.RNN == False:
+                    encoded = self.transformer_encoder(token_seq) # Put it through the transformer encoder
+                else:
+                    encoded, _= self.transformer_encoder(token_seq) # Put it through the RNN encoder
                 if self.use_cls:
                     cls_encoded = encoded[0,:,:]  # Only take the output from the CLS token
                 else:
