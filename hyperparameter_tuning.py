@@ -114,23 +114,23 @@ def try_hp(params):
 # Define the search space
 param_dist = {
     # B-spline basis
-    'num_B_spline_basis': hp.choice('num_B_spline_basis', [10, 30, 50]),
+    'num_B_spline_basis': hp.choice('num_B_spline_basis', [10]),
 
     # Transformer VAE settings
-    'downsample_factor': hp.choice('downsample_factor', [5, 10]),
-    'transformer_num_layers': hp.choice('transformer_num_layers', [1, 2, 4]),
-    'transformer_d_model': hp.choice('transformer_d_model', [128, 256, 512]),
-    'transformer_dim_feedforward': hp.choice('transformer_dim_feedforward', [256, 512, 1024]),
-    'transformer_vae_output_dim': hp.choice('transformer_vae_output_dim', [12, 24, 48]),
-    'transformer_dropout': hp.choice('transformer_dropout', [0.0, 0.2, 0.4]),
-    'transformer_nhead': hp.choice('transformer_nhead', [1, 2]),
+    'downsample_factor': hp.choice('downsample_factor', [10]),
+    'transformer_num_layers': hp.choice('transformer_num_layers', [1]),
+    'transformer_d_model': hp.choice('transformer_d_model', [128]),
+    'transformer_dim_feedforward': hp.choice('transformer_dim_feedforward', [512]),
+    'transformer_vae_output_dim': hp.choice('transformer_vae_output_dim', [12]),
+    'transformer_dropout': hp.choice('transformer_dropout', [0.0]),
+    'transformer_nhead': hp.choice('transformer_nhead', [1]),
 
     # Stimulus decoder
-    'stimulus_nfactor': hp.choice('stimulus_nfactor', [1, 2]),
-    'stimulus_decoder_inter_dim_factor': hp.choice('stimulus_decoder_inter_dim_factor', [1, 2, 4]),
+    'stimulus_nfactor': hp.choice('stimulus_nfactor', [2]),
+    'stimulus_decoder_inter_dim_factor': hp.choice('stimulus_decoder_inter_dim_factor', [4]),
 
     # VAE loss
-    'beta': hp.choice('beta', [0.0, 0.3, 1.0]),
+    'beta': hp.choice('beta', [0.0]),
 
     # Area-specific structure
     'use_area_specific_decoder': hp.choice('use_area_specific_decoder', [True]),
@@ -138,9 +138,9 @@ param_dist = {
     'use_cls': hp.choice('use_cls', [False]),
 
     # Coupling settings
-    'coupling_basis_peaks_max': hp.choice('coupling_basis_peaks_max', [3, 5, 10]),
-    'coupling_basis_num': hp.choice('coupling_basis_num', [3, 5]),
-    'coupling_nsubspace': hp.choice('coupling_nsubspace', [1, 2]),
+    'coupling_basis_peaks_max': hp.choice('coupling_basis_peaks_max', [7]),
+    'coupling_basis_num': hp.choice('coupling_basis_num', [3]),
+    'coupling_nsubspace': hp.choice('coupling_nsubspace', [1]),
     'use_self_coupling': hp.choice('use_self_coupling', [True]),
 
     # Coupling strength latent
@@ -154,18 +154,18 @@ param_dist = {
     'self_history_basis_nonlinear': hp.choice('self_history_basis_nonlinear', [1]),
 
     # Penalties
-    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [1e1, 1e2, 1e3]),
-    'penalty_coupling_subgroup': hp.choice('penalty_coupling_subgroup', [1e-5, 1e-4, 1e-3, 1e-2]),
+    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [1e3]),
+    'penalty_coupling_subgroup': hp.choice('penalty_coupling_subgroup', [1e-5]),
     'penalty_diff_loading': hp.choice('penalty_diff_loading', [None]),
-    'penalty_loading_similarity': hp.choice('penalty_loading_similarity', [1e-4, 1e-3, 1e-2, 1e-1]),
+    'penalty_loading_similarity': hp.choice('penalty_loading_similarity', [None]),
 
     # Training settings
-    'batch_size': hp.choice('batch_size', [32, 64, 128]),
-    'sample_latent': hp.choice('sample_latent', [True, False]),
+    'batch_size': hp.choice('batch_size', [64]),
+    'sample_latent': hp.choice('sample_latent', [False]),
     'lr': hp.choice('lr', [1e-3]),
-    'lr_transformer': hp.choice('lr_transformer', [1e-4, 3e-4, 1e-3]),
-    'lr_sti': hp.choice('lr_sti', [1e-3, 3e-3, 1e-2]),
-    'lr_cp': hp.choice('lr_cp', [1e-3, 3e-3, 1e-2]),
+    'lr_transformer': hp.choice('lr_transformer', [1e-4]),
+    'lr_sti': hp.choice('lr_sti', [1e-2]),
+    'lr_cp': hp.choice('lr_cp', [1e-2]),
     'lr_self_history': hp.choice('lr_self_history', [1e-2]),
     'epoch_warm_up': hp.choice('epoch_warm_up', [0]),
     'epoch_patience': hp.choice('epoch_patience', [3]),
@@ -183,7 +183,7 @@ best = fmin(
     fn=try_hp,
     space=param_dist,
     algo=tpe.suggest,  # Use Bayesian optimization
-    max_evals=500,  # Set the maximum number of evaluations
+    max_evals=1,  # Set the maximum number of evaluations
     trials=trials
 )
 
