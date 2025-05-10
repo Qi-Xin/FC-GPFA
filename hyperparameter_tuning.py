@@ -11,7 +11,7 @@ import sys
 import argparse
 
 parser = argparse.ArgumentParser(description='Run hyperparameter tuning with selected dataset')
-parser.add_argument('--dataset', type=str, choices=['single', 'two', 'all'], required=True,
+parser.add_argument('--dataset', type=str, choices=['single', 'two', 'ten', 'all'], required=True,
                    help='Dataset to use: "single" for single_sessions or "two" for two_sessions')
 args = parser.parse_args()
 
@@ -19,6 +19,7 @@ args = parser.parse_args()
 dataset_map = {
     'single': 'single_sessions.joblib',
     'two': 'two_sessions.joblib',
+    'ten': 'ten_sessions.joblib',
     'all': 'all_six_probes_sessions.joblib'
 }
 
