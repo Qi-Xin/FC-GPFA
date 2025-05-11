@@ -169,8 +169,8 @@ def use_pdf_plot(**kwargs):
     rcParams['legend.fontsize'] = SMALL_SIZE # legend
     rcParams['xtick.labelsize'] = SMALL_SIZE # tick label
     rcParams['ytick.labelsize'] = SMALL_SIZE # tick label
-    rcParams['xtick.major.size'] = 2  # length of x-axis major ticks
-    rcParams['ytick.major.size'] = 2  # length of y-axis major ticks
+    rcParams['xtick.major.size'] = 1.5  # length of x-axis major ticks
+    rcParams['ytick.major.size'] = 1.5  # length of y-axis major ticks
     rcParams['xtick.major.pad'] = 1  # Adjust as needed
     rcParams['ytick.major.pad'] = 1  # Adjust as needed
 
