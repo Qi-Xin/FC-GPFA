@@ -979,9 +979,9 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             gt = gt[sort_idx]
             ft = ft[sort_idx]
         # Plot ground truth
-        ax.scatter(gt, neurons, marker='o', s=6, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
+        ax.scatter(gt, neurons, marker='o', s=3, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
         # Plot fitted values
-        ax.scatter(ft, neurons, marker='s', s=6, label='Fitted', edgecolors='none', color='tab:blue', alpha=0.8)
+        ax.scatter(ft, neurons, marker='s', s=3, label='Fitted', edgecolors='none', color='tab:blue', alpha=0.8)
     else:
         colors = plt.cm.tab10.colors
         if ft.ndim == 1:
@@ -990,11 +990,11 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             sort_idx = np.argsort(ft[:,0])
             ft = ft[sort_idx, :]
         for i in range(ft.shape[1]):
-            ax.scatter(ft[:,i], neurons, alpha=0.5, marker='s', s=6, label=f'Fitted {i}', edgecolors='none', color=colors[i])
+            ax.scatter(ft[:,i], neurons, alpha=0.5, marker='s', s=3, label=f'Fitted {i}', edgecolors='none', color=colors[i])
 
     # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
     ax.set_title(title)
-    ax.set_ylabel(r'Shuffled Neurons')
+    ax.set_ylabel(r'Sorted neuron index')
     ax.set_xlabel(r'Weight')
     ax.set_ylim(-1, len(ft))
     ax.set_yticks([])
