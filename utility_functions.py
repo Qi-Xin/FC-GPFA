@@ -163,12 +163,12 @@ def use_pdf_plot(**kwargs):
     # rcParams['font.size'] = SMALL_SIZE
     rcParams['lines.linewidth'] = 1
     rcParams['axes.linewidth'] = 0.8  # Adjust as needed.
-    rcParams['axes.labelsize'] = MEDIUM_SIZE
-    rcParams['axes.titlesize'] = BIG_SIZE
-    rcParams['figure.titlesize'] = BIG_SIZE
-    rcParams['legend.fontsize'] = MEDIUM_SIZE
-    rcParams['xtick.labelsize'] = MEDIUM_SIZE
-    rcParams['ytick.labelsize'] = MEDIUM_SIZE
+    rcParams['axes.labelsize'] = SMALL_SIZE # axis label
+    rcParams['axes.titlesize'] = MEDIUM_SIZE # Title
+    rcParams['figure.titlesize'] = MEDIUM_SIZE # Suptitle
+    rcParams['legend.fontsize'] = SMALL_SIZE # legend
+    rcParams['xtick.labelsize'] = SMALL_SIZE # tick label
+    rcParams['ytick.labelsize'] = SMALL_SIZE # tick label
     rcParams['xtick.major.size'] = 2  # length of x-axis major ticks
     rcParams['ytick.major.size'] = 2  # length of y-axis major ticks
     rcParams['xtick.major.pad'] = 1  # Adjust as needed
@@ -993,10 +993,9 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             ax.scatter(ft[:,i], neurons, alpha=0.5, marker='s', s=6, label=f'Fitted {i}', edgecolors='none', color=colors[i])
 
     # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
-    ax.set_title(title, fontsize=7)
-    ax.set_ylabel(r'Shuffled Neurons', fontsize=6)
-    ax.set_xlabel(r'Weight', fontsize=6)
-    ax.tick_params(labelsize=6)
+    ax.set_title(title)
+    ax.set_ylabel(r'Shuffled Neurons')
+    ax.set_xlabel(r'Weight')
     ax.set_ylim(-1, len(ft))
     ax.set_yticks([])
 
