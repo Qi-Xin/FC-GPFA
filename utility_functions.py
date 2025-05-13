@@ -958,7 +958,7 @@ def centralize_factor(factor):
     return factor - factor.mean(axis=0)
 
 
-def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
+def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True, neuron_to_plot_in_red=None):
     """
     Horizontal version: X = loading value, Y = neuron.
     Ground truth = circles, Fitted = squares.
@@ -978,6 +978,7 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
             sort_idx = np.argsort(gt)
             gt = gt[sort_idx]
             ft = ft[sort_idx]
+        
         # Plot ground truth
         ax.scatter(gt, neurons, marker='o', s=3, label='Ground truth', edgecolors='none', color='tab:green', alpha=0.5)
         # Plot fitted values
@@ -989,8 +990,19 @@ def plot_single_factor_loading_horizontal(ax, gt, ft, title="", sort=True):
         if sort:
             sort_idx = np.argsort(ft[:,0])
             ft = ft[sort_idx, :]
+            if neuron_to_plot_in_red is not None:
+                neuron_to_plot_in_red = np.where(np.isin(sort_idx, neuron_to_plot_in_red))[0]
+        
+        mask = np.ones(len(neurons), dtype=bool)
+        if neuron_to_plot_in_red is not None:
+            mask[neuron_to_plot_in_red] = False
+            
         for i in range(ft.shape[1]):
-            ax.scatter(ft[:,i], neurons, alpha=0.5, marker='s', s=3, label=f'Fitted {i}', edgecolors='none', color=colors[i])
+            if neuron_to_plot_in_red is not None:
+                ax.scatter(ft[~mask,i], neurons[~mask], alpha=1, marker='s', s=3, 
+                          label=f'Fitted {i} (highlighted)', edgecolors='none', color='red')
+            ax.scatter(ft[mask,i], neurons[mask], alpha=0.5, marker='s', s=3, 
+                      label=f'Fitted {i}', edgecolors='none', color=colors[i])
 
     # ax.axvline(0, color='gray', linewidth=0.5, linestyle='--')
     ax.set_title(title)

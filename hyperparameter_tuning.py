@@ -123,7 +123,7 @@ param_dist = {
     'transformer_num_layers': hp.choice('transformer_num_layers', [1]),
     'transformer_d_model': hp.choice('transformer_d_model', [128]),
     'transformer_dim_feedforward': hp.choice('transformer_dim_feedforward', [512]),
-    'transformer_vae_output_dim': hp.choice('transformer_vae_output_dim', [12]),
+    'transformer_vae_output_dim': hp.choice('transformer_vae_output_dim', [24]),
     'transformer_dropout': hp.choice('transformer_dropout', [0.0]),
     'transformer_nhead': hp.choice('transformer_nhead', [1]),
 

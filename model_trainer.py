@@ -322,6 +322,7 @@ class Trainer:
             self, 
             dataset='test',
             batch_indices=[0,1,2,3,4],
+            manual_batches=None,
             include_stimulus=True,
             include_coupling=False,
             include_self_history=False,
@@ -346,9 +347,14 @@ class Trainer:
         else:
             raise ValueError("Invalid dataset. Choose from 'val', 'train', or 'test'.")
         
+        if manual_batches is not None:
+            batch_indices = np.arange(len(manual_batches))
         with torch.no_grad():
             for batch_idx in batch_indices:
-                batch = loader.dataloader.get_batch(batch_idx, dataset)
+                if manual_batches is None:
+                    batch = loader.dataloader.get_batch(batch_idx, dataset)
+                else:
+                    batch = manual_batches[batch_idx]
                 self.process_batch(batch)
                 firing_rate = self.model(
                     batch,
