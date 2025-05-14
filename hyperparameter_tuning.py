@@ -116,7 +116,7 @@ def try_hp(params):
 # Define the search space
 param_dist = {
     # B-spline basis
-    'num_B_spline_basis': hp.choice('num_B_spline_basis', [10]),
+    'num_B_spline_basis': hp.choice('num_B_spline_basis', [20]),
 
     # Transformer VAE settings
     'downsample_factor': hp.choice('downsample_factor', [10]),
@@ -156,7 +156,7 @@ param_dist = {
     'self_history_basis_nonlinear': hp.choice('self_history_basis_nonlinear', [1]),
 
     # Penalties
-    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [1e3]),
+    'penalty_smoothing_spline': hp.choice('penalty_smoothing_spline', [3e2]),
     'penalty_coupling_subgroup': hp.choice('penalty_coupling_subgroup', [1e-5]),
     'penalty_diff_loading': hp.choice('penalty_diff_loading', [None]),
     'penalty_loading_similarity': hp.choice('penalty_loading_similarity', [None]),
