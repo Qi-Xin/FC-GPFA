@@ -2737,7 +2737,217 @@ def EIF_simulator(
         res.append(I_syn_rcd)
     return res
 
+def EIF_simulator_six_areas(
+        ntrial, 
+        nneuron_part, 
+        conn, 
+        params = {},
+        nneuron_coupling=None,
+        shared_background=0.0,
+        no_stimulus=False,
+        return_I_ext=False,
+        return_trial_info=False,
+        return_I_syn=False,
+    ):
+    narea = 4
+    with open('EIF_params.pickle', 'rb') as handle:
+        EIF_params = pickle.load(handle)
 
+    bin_size = 2 # final spikes_rcd bin size in ms
+    dt = 0.2 # ms
+    ndt = int(1/dt) # number of simulation time bins per ms
+    padding = 100 # ms
+    nt = (500)*ndt # total number of simulation time bins
+    npadding = padding*ndt # number of simulation time bins for padding
+    nt_tot = nt + npadding # total number of simulation time bins including padding
+    noise_amp = 1.0
+    nneuron = narea * nneuron_part
+    if nneuron_coupling is None:
+        nneuron_coupling = nneuron_part
+
+    ### Getting the connectivity matrix
+    J_cross = np.zeros((nneuron, nneuron)) # From row i to column j
+    J_recurrent = np.zeros((nneuron, nneuron)) # From row i to column j
+    pop_level_coupling_list = [[0,1], [1,2], [0,3]]
+    for iarea, jarea in pop_level_coupling_list:
+        J_cross[iarea*nneuron_part:(iarea*nneuron_part+nneuron_coupling),
+            jarea*nneuron_part:(jarea*nneuron_part+nneuron_coupling)] = (
+            np.random.lognormal(mean=np.log(conn), sigma=0.4, size=(nneuron_coupling, nneuron_coupling)) 
+            if conn!=0 else 0.0
+        )
+    for iarea in range(narea):
+        J_recurrent[iarea*nneuron_part:(iarea+1)*nneuron_part,
+            iarea*nneuron_part:(iarea+1)*nneuron_part] = (
+            np.random.lognormal(mean=np.log(0.001), sigma=0.4, size=(nneuron_part, nneuron_part)) 
+        )
+
+
+    ### Getting the bump centers and trial info
+    bump_centers1, bump_centers2, trial_info_bump = get_bump_centers(params, ntrial)
+    bump_centers3, bump_centers4, trial_info_bump = get_bump_centers(params, ntrial)
+    baseline = 0.0
+    bump_amp = 0.25
+
+    ### Getting the external input after the bump centers are determined
+    source1 = {"bump_pre_center": [EIF_params["V1_pre_center_p1"],
+                                EIF_params["V1_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
+    source2 = {"bump_pre_center": [EIF_params["LM_pre_center_p1"],
+                                EIF_params["LM_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
+    source3 = {"bump_pre_center": [EIF_params["V1_pre_center_p1"],
+                                EIF_params["V1_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
+    source4 = {"bump_pre_center": [EIF_params["LM_pre_center_p1"],
+                                EIF_params["LM_pre_center_p2"]], 
+            "bump_center": np.nan, 
+            "baseline": baseline, 
+            "bump_amp": bump_amp }
+    source1["bump_center"] = [bump_centers1[:, 0], bump_centers2[:, 0]]
+    source2["bump_center"] = [bump_centers1[:, 1], bump_centers2[:, 1]]
+    source3["bump_center"] = [bump_centers3[:, 0], bump_centers4[:, 0]]
+    source4["bump_center"] = [bump_centers3[:, 1], bump_centers4[:, 1]]
+    getI_real_data(source1, dt, nt, npadding, EIF_params["V1_template"])
+    getI_real_data(source2, dt, nt, npadding, EIF_params["LM_template"])
+    getI_real_data(source3, dt, nt, npadding, EIF_params["V1_template"])
+    getI_real_data(source4, dt, nt, npadding, EIF_params["LM_template"])
+
+    I_ext = 0.0*np.ones((nt_tot, nneuron, ntrial))
+    if not no_stimulus:
+        for iarea in range(narea):
+            if iarea == 0:
+                temp = source1["I"]
+            elif iarea == 1:
+                temp = source2["I"]
+            elif iarea == 2:
+                temp = source3["I"]
+            else:
+                temp = source4["I"]
+            # temp = source["I"]*(1-iarea/(narea-1)) + target["I"]*(iarea/(narea-1))
+            I_ext[:,iarea*nneuron_part:(iarea+1)*nneuron_part,:] = (
+                np.repeat(temp[:,np.newaxis,:],nneuron_part, axis=1)
+            )
+
+    trial_info_slope, trial_info_gain = None, None
+    ### Getting the external input after some background slope is added
+    if params["external_input_type"] in [
+        "two_peaks_with_varying_slope", "two_peaks_with_varying_timing_baseline_slope"
+        ]:
+        slopes = np.random.uniform(params["min_slope"], params["max_slope"], (1, 1, ntrial))
+        t = np.arange(nt_tot)[:,np.newaxis,np.newaxis]
+        time_line = slopes * 1e-3 * (t - nt/2 - npadding)
+        I_ext += (time_line - time_line.min())  # Center around middle timepoint
+        trial_info_slope = slopes.flatten()
+    if params["external_input_type"] in [
+        "two_peaks_with_varying_gain", "two_peaks_with_varying_timing_baseline_slope"
+        ]:
+        gains = np.random.uniform(params["min_gain"], params["max_gain"], (1, 1, ntrial))
+        I_ext += gains
+        trial_info_gain = gains.flatten()
+    if params["external_input_type"] == "two_peaks_with_all_varying":
+        # Generate baseline variations using Gaussian Process
+        t = np.arange(nt_tot)
+
+        # Generate GP baseline with RBF kernel
+        length_scale = params["gp_time_constant"] * ndt  # Controls smoothness of variations
+        amplitude = params["gp_amplitude"]  # Controls magnitude of variations
+
+        # Generate independent GP for each trial using lower resolution and interpolation
+        downsample_factor = 50  # Reduce resolution by this factor
+        t_low_res = t[::downsample_factor]
+
+        gp_baseline = np.zeros((nt_tot, narea, ntrial))
+
+        # Generate GP at lower resolution
+        K_low_res = np.exp(-0.5 * (np.subtract.outer(t_low_res, t_low_res)**2) / length_scale**2)
+
+        # Shape: (2, ntrial, len(t_low_res))
+        # shared_background = np.clip(shared_background, 0.0, 1.0)
+        gp_low_res = amplitude * np.random.multivariate_normal(
+            np.zeros(len(t_low_res)), K_low_res, size=(narea, ntrial)
+        )
+        # indep_component = np.sqrt(1 - shared_background) * gp_low_res[1, :, :]
+        # shared_component = np.sqrt(shared_background) * gp_low_res[0, :, :]
+        # gp_low_res[1, :, :] = indep_component + shared_component
+
+        loading_mat = np.random.uniform(low=0.5, high=1.0, size=(nneuron_part, narea))
+
+        for iarea in range(narea):
+            for trial in range(ntrial):
+                # Interpolate for each trial separately
+                gp_baseline[:, iarea, trial] = np.interp(t, t_low_res, gp_low_res[iarea, trial, :])
+
+            # Apply loading matrix
+            I_ext[:, iarea * nneuron_part : (iarea + 1) * nneuron_part, :] += (
+                gp_baseline[:, iarea:iarea+1, :] * loading_mat[None, :, iarea:iarea+1]
+            )
+
+        trial_info_gain = gp_baseline.mean(axis=(0,1)).flatten()
+        trial_info_slope = (gp_baseline[-1,:,:] - gp_baseline[0,:,:]).flatten() / (nt_tot * dt)
+
+    if params["external_input_type"] == "two_peaks_with_varying_timing":
+        pass
+
+    # Unit: mV or ms
+    tau = 15
+    EL = -60
+    VT = -50
+    Vth = -10
+    Vre = -65
+    DltT = 2
+    tau_ref = 1
+    tau_d = 5
+    tau_r = 1
+
+    nsyn_func = 3*tau_d*ndt
+    syn_time_line = np.arange(nsyn_func)
+    syn_func = (np.exp(-syn_time_line*dt/tau_d)-np.exp(-syn_time_line*dt/tau_r))[:, np.newaxis]
+    ntau_ref = tau_ref*ndt
+    spikes_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
+    I_syn_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
+    I_ext_rcd = np.zeros((int(nt_tot/ndt/bin_size), nneuron, ntrial))
+    for itrial in tqdm(range(ntrial)):
+        V = Vre*np.ones((nt_tot, nneuron))
+        I_syn_cross = np.zeros((nt_tot+nsyn_func+1, nneuron))
+        I_syn_recurrent = np.zeros((nt_tot+nsyn_func+1, nneuron))
+        I_syn = np.zeros((nt_tot+nsyn_func+1, nneuron))
+        spikes = np.zeros((nt_tot, nneuron))
+
+        for t in range(1, nt_tot):
+            I_leak = -dt/tau*(V[t-1,:]-EL) + dt/tau*DltT*np.exp((V[t-1,:]-VT)/DltT)
+            I_noise = np.random.normal(0, noise_amp**2, nneuron)
+            dV = I_leak + I_noise + I_syn[t,:] + I_ext[t,:,itrial]
+            V[t,:] = V[t-1,:] + dV*(int(dt/0.1))
+
+            spikes[t,:] = (V[t,:]>=Vth).astype(int)
+            I_syn_cross[(t+1):(t+nsyn_func+1),:] += spikes[t:(t+1),:]@J_cross*syn_func
+            I_syn_recurrent[(t+1):(t+nsyn_func+1),:] += spikes[t:(t+1),:]@J_recurrent*syn_func
+            I_syn[(t+1):(t+nsyn_func+1),:] = I_syn_cross[(t+1):(t+nsyn_func+1),:] + I_syn_recurrent[(t+1):(t+nsyn_func+1),:]
+
+            in_ref = ((spikes[max(0,t-ntau_ref):(t+1),:].sum(axis=0))>0).astype(int)
+            V[t,:] += in_ref*(Vre-V[t,:])
+
+            # Sum spikes over ndt time bins and store directly in final array
+            if t % (ndt*bin_size) == 0:
+                time_idx = t // (ndt*bin_size)
+                spikes_rcd[time_idx,:,itrial] = spikes[t-ndt*bin_size+1:t+1,:].sum(axis=0)
+                I_syn_rcd[time_idx,:,itrial] = I_syn_cross[t-ndt*bin_size+1:t+1,:].mean(axis=0)
+                I_ext_rcd[time_idx,:,itrial] = I_ext[t-ndt*bin_size+1:t+1,:, itrial].mean(axis=0)
+            
+    res = [spikes_rcd]
+    if return_trial_info:
+        res.append({"bump": trial_info_bump, "gain": trial_info_gain, "slope": trial_info_slope})
+    if return_I_ext:
+        res.append(I_ext)
+    if return_I_syn:
+        res.append(I_syn_rcd)
+    return res
     
 def get_p(std1, corr1, std2, corr2, ntrial, conn):
 
